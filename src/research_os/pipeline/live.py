@@ -10,6 +10,7 @@ from research_os.exchanges.bybit.client import BybitRestClient
 from research_os.exchanges.bybit.ws import BybitWebSocket,BybitWebSocketConfig
 from research_os.market.state_builder import MarketStateBuilder
 from research_os.features.engine import FeatureEngine
+from research_os.features.orderflow import OrderFlowEngine, TradeObservation, snapshot_features
 from research_os.intelligence.analyzer import MarketAnalyzer
 from research_os.intelligence.probability import ProbabilityEngine
 from research_os.notifications.telegram import TelegramFormatter
@@ -32,7 +33,8 @@ class LiveSignalService:
     def __init__(self,symbol="BTCUSDT",interval="1",publisher:EventPublisher|None=None,telegram:TelegramClient|None=None,config=None):
         self.symbol=symbol; self.interval=interval; self.publisher=publisher
         self.telegram=telegram
-        self.closes=deque(maxlen=2000); self.highs=deque(maxlen=2000); self.lows=deque(maxlen=2000); self.bars_1m=deque(maxlen=2000)
+        self.closes=deque(maxlen=2000); self.highs=deque(maxlen=2000); self.lows=deque(maxlen=2000); self.bars_1m=deque(maxlen=2000); self.trades=deque(maxlen=5000)
+        self.orderflow=OrderFlowEngine(); self.cumulative_delta=0.0; self.previous_flow_price=None; self.previous_flow_cvd=0.0
         self.mtf=MultiTimeframeFeatureEngine()
         self._last_candle_start=None
         self.orderbook=OrderBook(symbol,max_levels=50)
@@ -43,13 +45,23 @@ class LiveSignalService:
         self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(),TelegramFormatter(),SignalGuard())
         self.outcomes=SignalOutcomeRepository(); self.states=MarketStateRepository()
         self.websocket=BybitWebSocket(
-            [f"kline.{interval}.{symbol}",f"tickers.{symbol}",f"orderbook.50.{symbol}"],
+            [f"kline.{interval}.{symbol}",f"tickers.{symbol}",f"orderbook.50.{symbol}",f"publicTrade.{symbol}"],
             self._handle,config or BybitWebSocketConfig()
         )
 
     async def _handle(self,message):
         topic=message.get("topic","")
         try:
+            if topic.startswith("publicTrade."):
+                event=BybitNormalizer.trade(message); p=event.payload
+                self.trades.append(TradeObservation(event.event_time,float(p["price"]),float(p["size"]),str(p["side"])))
+                flow=self.orderflow.build([self.trades[-1]],event.event_time,cumulative_delta_base=self.cumulative_delta,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
+                if flow.available:
+                    self.cumulative_delta=flow.cumulative_delta or self.cumulative_delta
+                    self.previous_flow_price=float(p["price"])
+                    self.previous_flow_cvd=self.cumulative_delta
+                if self.publisher: await self.publisher(event)
+                return
             if topic.startswith("kline."):
                 event=BybitNormalizer.kline(message); p=event.payload
                 if not p.get("confirm"): return
@@ -81,7 +93,10 @@ class LiveSignalService:
                     highs=list(self.highs),lows=list(self.lows),orderbook=self.orderbook.state
                 )
                 mtf_snapshot=self.mtf.build(self.symbol,list(self.bars_1m),event.event_time,as_of=now)
-                state=self.builder.build_multi(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap)
+                flow=self.orderflow.build(list(self.trades),event.event_time,cumulative_delta_base=0.0,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
+                flow_values=snapshot_features(flow)
+                flow_values["orderflow_cumulative_delta"]=self.cumulative_delta
+                state=self.builder.build_multi(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap,extra_values=flow_values,extra_availability={key: flow.available and value is not None for key,value in flow_values.items()})
                 def save_state():
                     with SessionLocal() as session:
                         self.states.save(session,state); session.commit()

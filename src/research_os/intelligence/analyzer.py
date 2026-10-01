@@ -49,6 +49,21 @@ class MarketAnalyzer:
             elif obi < -0.05:
                 add("orderbook_imbalance", EvidenceDirection.BEARISH, obi, min(abs(obi), 1.0), "ask depth exceeds bid depth")
 
+        flow=state.values.get("orderflow_imbalance")
+        if state.availability.get("orderflow_imbalance", False) and flow is not None:
+            if flow > 0.10:
+                add("orderflow_imbalance", EvidenceDirection.BULLISH, flow, min(abs(flow), 1.0), "aggressive buy volume exceeds sell volume")
+            elif flow < -0.10:
+                add("orderflow_imbalance", EvidenceDirection.BEARISH, flow, min(abs(flow), 1.0), "aggressive sell volume exceeds buy volume")
+
+        divergence=state.values.get("orderflow_price_delta_divergence")
+        if state.availability.get("orderflow_price_delta_divergence", False) and divergence:
+            add("orderflow_price_delta_divergence", EvidenceDirection.BULLISH if divergence > 0 else EvidenceDirection.BEARISH, divergence, 0.5, "price and cumulative delta moved in opposite directions")
+
+        absorption=state.values.get("orderflow_absorption")
+        if state.availability.get("orderflow_absorption", False) and absorption is not None and absorption >= 0.20:
+            add("orderflow_absorption", EvidenceDirection.NEUTRAL, absorption, min(absorption, 1.0), "large-trade concentration with directional flow")
+
         vol=state.values.get("realized_vol")
         if vol is not None:
             add("realized_vol", EvidenceDirection.NEUTRAL, vol, min(vol / 0.02, 1), "volatility is state information, not direction")
