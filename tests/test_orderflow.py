@@ -47,3 +47,10 @@ def test_absorption_metric_is_bounded():
         datetime.fromtimestamp(2,tz=timezone.utc),
     )
     assert 0.0 <= result.absorption <= 1.0
+
+def test_divergence_requires_previous_price_and_cvd():
+    result=OrderFlowEngine().build(
+        [trade(1,1,"Sell"), trade(2,1,"Buy")],
+        datetime.fromtimestamp(2,tz=timezone.utc),
+    )
+    assert result.price_delta_divergence is None
