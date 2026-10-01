@@ -1,13 +1,13 @@
 """persistent execution audit and human interaction state
 
 Revision ID: 0008_execution_audit
-Revises: 0007_cross_market_dataset, 0004_signal_outcomes
+Revises: 0007_cross_market_dataset
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision="0008_execution_audit"
-down_revision=("0007_cross_market_dataset","0004_signal_outcomes")
+down_revision="0007_cross_market_dataset"
 branch_labels=None
 depends_on=None
 
