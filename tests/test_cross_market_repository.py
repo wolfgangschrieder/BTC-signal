@@ -29,6 +29,14 @@ def test_latest_passes_decision_time_to_both_event_and_pit_filters():
     assert "point_in_time_available_at<=:decision_time" in sql
     assert params["decision_time"]==t
 
+def test_latest_uses_deterministic_ordering_for_same_event_time():
+    session=FakeSession()
+    CrossMarketRepository().latest(session,"DXY",datetime(2026,1,2,tzinfo=timezone.utc))
+    sql,_=session.calls[0]
+    assert "ORDER BY event_time DESC" in sql
+    assert "point_in_time_available_at DESC" in sql
+    assert "source ASC" in sql
+
 def test_save_preserves_observation_pit():
     session=FakeSession()
     obs=CrossMarketObservation("DXY",datetime(2026,1,1,tzinfo=timezone.utc),datetime(2026,1,1,0,1,tzinfo=timezone.utc),100.0,"test")
