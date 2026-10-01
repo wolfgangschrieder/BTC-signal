@@ -16,6 +16,12 @@ class MarketAnalyzer:
         r5=state.values.get("return_5")
         if r5 is not None:
             add("return_5", EvidenceDirection.BULLISH if r5>0 else EvidenceDirection.BEARISH, r5, min(abs(r5)/0.03,1), "positive/negative multi-bar return")
+        obi=state.values.get("orderbook_imbalance")
+        if obi is not None and state.availability.get("orderbook_imbalance", False):
+            if obi > 0.05:
+                add("orderbook_imbalance", EvidenceDirection.BULLISH, obi, min(abs(obi), 1.0), "bid depth exceeds ask depth")
+            elif obi < -0.05:
+                add("orderbook_imbalance", EvidenceDirection.BEARISH, obi, min(abs(obi), 1.0), "ask depth exceeds bid depth")
         vol=state.values.get("realized_vol")
         if vol is not None:
             add("realized_vol", EvidenceDirection.NEUTRAL, vol, min(vol/0.02,1), "volatility is state information, not direction")
