@@ -1,5 +1,6 @@
 from __future__ import annotations
 from .models import CrossMarketObservation, CrossMarketSnapshot
+from .state import classify
 
 class CrossMarketFeatureEngine:
     version="cross-market-v1"
@@ -18,7 +19,8 @@ class CrossMarketFeatureEngine:
             values[asset]=obs.value
             availability[asset]=True
             sources[asset]=obs.source
-        return CrossMarketSnapshot(timestamp,values,availability,sources,self.version)
+        snapshot=CrossMarketSnapshot(timestamp,values,availability,sources,self.version)
+        return snapshot
 
 def returns(snapshot, previous):
     out={}
