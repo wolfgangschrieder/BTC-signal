@@ -31,6 +31,7 @@ def upgrade():
         sa.Column("regime_after",sa.String(64)),
         sa.Column("created_at",sa.DateTime(timezone=True),server_default=sa.func.now(),nullable=False),
         sa.UniqueConstraint("symbol","state_timestamp","horizon_minutes","state_version",name="uq_derivatives_state_outcome"),
+        schema="research",
     )
     op.create_index("ix_derivatives_state_outcomes_symbol_time","derivatives_state_outcomes",["symbol","state_timestamp"],schema="research")
     op.create_index("ix_derivatives_state_outcomes_fingerprint","derivatives_state_outcomes",["state_fingerprint"],schema="research")
