@@ -23,11 +23,12 @@ class HumanConfirmationService:
     """Human approval boundary. It never submits an exchange order."""
     version="confirmation-v1"
 
-    def __init__(self, ttl_seconds: int=60):
+    def __init__(self, ttl_seconds: int=60, repository=None):
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
         self.ttl=timedelta(seconds=ttl_seconds)
         self._pending: dict[str,PendingConfirmation]={}
+        self.repository=repository
 
     def create(self, signal: SignalResult, now: datetime | None=None) -> PendingConfirmation:
         now=now or datetime.now(timezone.utc)
@@ -35,6 +36,8 @@ class HumanConfirmationService:
             raise ValueError("now must be timezone-aware")
         item=PendingConfirmation(signal.signal_id,signal.symbol,signal.direction.value,now,now+self.ttl)
         self._pending[item.signal_id]=item
+        if self.repository is not None:
+            self.repository.save_confirmation(item)
         return item
 
     def get(self, signal_id: str, now: datetime | None=None) -> PendingConfirmation | None:
@@ -45,6 +48,8 @@ class HumanConfirmationService:
         if now >= item.expires_at and item.status is ConfirmationStatus.PENDING:
             item=PendingConfirmation(item.signal_id,item.symbol,item.direction,item.created_at,item.expires_at,ConfirmationStatus.EXPIRED)
             self._pending[signal_id]=item
+            if self.repository is not None:
+                self.repository.save_confirmation(item)
         return item
 
     def confirm(self, signal_id: str, now: datetime | None=None) -> PendingConfirmation:
@@ -55,6 +60,8 @@ class HumanConfirmationService:
             raise ValueError(f"confirmation is {item.status.value}")
         item=PendingConfirmation(item.signal_id,item.symbol,item.direction,item.created_at,item.expires_at,ConfirmationStatus.CONFIRMED)
         self._pending[signal_id]=item
+        if self.repository is not None:
+            self.repository.save_confirmation(item)
         return item
 
     def cancel(self, signal_id: str, now: datetime | None=None) -> PendingConfirmation:
@@ -65,4 +72,6 @@ class HumanConfirmationService:
             raise ValueError(f"confirmation is {item.status.value}")
         item=PendingConfirmation(item.signal_id,item.symbol,item.direction,item.created_at,item.expires_at,ConfirmationStatus.CANCELLED)
         self._pending[signal_id]=item
+        if self.repository is not None:
+            self.repository.save_confirmation(item)
         return item
