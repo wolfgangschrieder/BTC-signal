@@ -20,7 +20,12 @@ from research_os.signals.guard import SignalExecutionContext, SignalGuard
 
 def percentile(samples, q):
     xs = sorted(samples)
-    return xs[min(len(xs) - 1, int(round(q * (len(xs) - 1))))]
+    if not xs:
+        raise ValueError("cannot calculate percentile of empty samples")
+    if q <= 0.0:
+        return xs[0]
+    index = min(len(xs) - 1, int(__import__("math").ceil(q * len(xs))) - 1)
+    return xs[index]
 
 
 def summarize(samples):
