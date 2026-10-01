@@ -7,6 +7,7 @@ from research_os.notifications.telegram import TelegramFormatter
 from research_os.signals.engine import SignalEngine
 from research_os.signals.guard import SignalGuard, SignalExecutionContext
 from research_os.features.liquidity import LiquidityCluster
+from research_os.pipeline.latency import LatencyTelemetry
 
 @dataclass
 class RealtimeSignalPipeline:
@@ -15,12 +16,24 @@ class RealtimeSignalPipeline:
     signal: SignalEngine
     formatter: TelegramFormatter
     guard: SignalGuard
+    latency: LatencyTelemetry | None = None
 
     def evaluate(self, state: MarketStateVector, price: float, atr: float|None, context: SignalExecutionContext|None=None, liquidity_clusters: tuple[LiquidityCluster,...]=()):
-        analysis=self.analyzer.analyze(state)
-        probability=self.probability.predict(analysis)
-        signal=self.signal.build(analysis,probability,price,atr,liquidity_clusters=liquidity_clusters)
+        if self.latency is None:
+            analysis=self.analyzer.analyze(state)
+            probability=self.probability.predict(analysis)
+            signal=self.signal.build(analysis,probability,price,atr,liquidity_clusters=liquidity_clusters)
+            allowed=self.guard.allow(signal,context)
+        else:
+            with self.latency.timer("analysis"):
+                analysis=self.analyzer.analyze(state)
+            with self.latency.timer("probability"):
+                probability=self.probability.predict(analysis)
+            with self.latency.timer("signal"):
+                signal=self.signal.build(analysis,probability,price,atr,liquidity_clusters=liquidity_clusters)
+            with self.latency.timer("guard"):
+                allowed=self.guard.allow(signal,context)
         message=None
-        if self.guard.allow(signal,context):
+        if allowed:
             message=self.formatter.format(signal)
         return signal,message
