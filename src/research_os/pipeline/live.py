@@ -49,6 +49,9 @@ class LiveSignalService:
         self.rest=BybitRestClient()
         self._last_orderbook_update=datetime.min.replace(tzinfo=timezone.utc)
         self._recovery_lock=asyncio.Lock()
+        self._state_write_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
+        self._outcome_write_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
+        self._writer_stop = object()
         self.features=FeatureEngine(); self.builder=MarketStateBuilder()
         guard_instance = guard or SignalGuard(
             max_latency_ms=float(getattr(config, "signal_guard_max_latency_ms", 500.0)) if config is not None else 500.0,
@@ -160,10 +163,11 @@ class LiveSignalService:
                 self.previous_derivatives_price=float(event.payload["close"])
                 self.previous_funding=self.derivatives_funding
                 self.previous_oi=self.derivatives_oi
-                def save_state():
-                    with SessionLocal() as session:
-                        self.states.save(session,state); session.commit()
-                await asyncio.to_thread(save_state)
+                try:
+                    self._state_write_queue.put_nowait(state)
+                except asyncio.QueueFull:
+                    _ = self._state_write_queue.get_nowait()
+                    self._state_write_queue.put_nowait(state)
                 spread_bps=None
                 book_state=self.orderbook.state
                 if book_state.valid and book_state.bids and book_state.asks:
@@ -177,7 +181,10 @@ class LiveSignalService:
                 clusters=tuple(liquidity_state.bid_clusters+liquidity_state.ask_clusters) if liquidity_state.valid else ()
                 signal,msg=self.pipeline.evaluate(state,price,self._atr_from_features(snap),context=context,liquidity_clusters=clusters)
                 if signal.levels is not None and signal.direction.value!="none":
-                    await self._record_pending(signal)
+                    try:
+                        self._outcome_write_queue.put_nowait(signal)
+                    except asyncio.QueueFull:
+                        pass
                 if msg and self.telegram: await self.telegram.send(msg.text)
         except (KeyError,ValueError,TypeError):
             return
@@ -207,18 +214,49 @@ class LiveSignalService:
     async def _is_stopped(self):
         return getattr(self.websocket,"_stop").is_set()
 
+    async def _cold_writer(self):
+        while True:
+            state = await self._state_write_queue.get()
+            if state is self._writer_stop:
+                self._state_write_queue.task_done()
+                break
+            try:
+                with SessionLocal() as session:
+                    self.states.save(session, state)
+                    session.commit()
+            except Exception:
+                pass
+            finally:
+                self._state_write_queue.task_done()
+
+    async def _cold_outcome_writer(self):
+        while True:
+            signal = await self._outcome_write_queue.get()
+            if signal is self._writer_stop:
+                self._outcome_write_queue.task_done()
+                break
+            try:
+                levels = signal.levels
+                if levels is not None:
+                    outcome = SignalOutcome(
+                        signal.signal_id, signal.symbol, signal.direction.value, signal.timestamp,
+                        (levels.entry_min + levels.entry_max) / 2, levels.stop_loss,
+                        levels.tp1, levels.tp2, levels.tp3, signal.probability,
+                        OutcomeStatus.PENDING, horizon_minutes=60
+                    )
+                    with SessionLocal() as session:
+                        self.outcomes.record_pending(session, outcome)
+                        session.commit()
+            except Exception:
+                pass
+            finally:
+                self._outcome_write_queue.task_done()
+
     async def _record_pending(self,signal):
-        levels=signal.levels
-        if levels is None: return
-        outcome=SignalOutcome(
-            signal.signal_id,signal.symbol,signal.direction.value,signal.timestamp,
-            (levels.entry_min+levels.entry_max)/2,levels.stop_loss,levels.tp1,levels.tp2,levels.tp3,
-            signal.probability,OutcomeStatus.PENDING,horizon_minutes=60
-        )
-        def write():
-            with SessionLocal() as session:
-                self.outcomes.record_pending(session,outcome); session.commit()
-        await asyncio.to_thread(write)
+        try:
+            self._outcome_write_queue.put_nowait(signal)
+        except asyncio.QueueFull:
+            pass
 
     def _atr_from_features(self,snapshot):
         for feature in snapshot.features:
@@ -248,11 +286,19 @@ class LiveSignalService:
         await self.bootstrap_derivatives_history()
         await self.bootstrap_orderbook()
         watchdog=asyncio.create_task(self._orderbook_watchdog())
+        state_writer=asyncio.create_task(self._cold_writer())
+        outcome_writer=asyncio.create_task(self._cold_outcome_writer())
         try:
             await self.websocket.run()
         finally:
             watchdog.cancel()
             await asyncio.gather(watchdog,return_exceptions=True)
+            for queue in (self._state_write_queue, self._outcome_write_queue):
+                try:
+                    queue.put_nowait(self._writer_stop)
+                except asyncio.QueueFull:
+                    pass
+            await asyncio.gather(state_writer,outcome_writer,return_exceptions=True)
 
     async def stop(self):
         await self.websocket.stop()
