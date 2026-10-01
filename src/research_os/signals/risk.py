@@ -75,11 +75,10 @@ class RiskEngine:
         pool=max(candidates,key=lambda x:x.size)
         return pool.price+buffer
 
-    @staticmethod
-    def _select_cluster(side, entry, atr, clusters):
+    def _select_cluster(self, side, entry, atr, clusters):
         if atr <= 0: return None
         candidates=[]
         for c in clusters:
-            if side=="long" and c.side=="bid" and c.center_price < entry and entry-c.center_price <= 3*atr and (c.persistent or not RiskEngine().policy.require_persistent_liquidity): candidates.append(c)
+            if side=="long" and c.side=="bid" and c.center_price < entry and entry-c.center_price <= 3*atr and (c.persistent or not self.policy.require_persistent_liquidity): candidates.append(c)
             if side=="short" and c.side=="ask" and c.center_price > entry and c.center_price-entry <= 3*atr and (c.persistent or not RiskEngine().policy.require_persistent_liquidity): candidates.append(c)
         return max(candidates,key=lambda c:(c.size_percentile,c.total_size),default=None)
