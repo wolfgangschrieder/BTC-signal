@@ -116,7 +116,6 @@ def event_fingerprint(event: RawEvent) -> str:
         "event_type": event.event_type.value,
         "symbol": event.symbol,
         "event_time": event.event_time.astimezone(timezone.utc).isoformat(),
-        "point_in_time_available_at": event.point_in_time_available_at.astimezone(timezone.utc).isoformat(),
         "payload": event.payload,
         "schema_version": event.schema_version,
     }
