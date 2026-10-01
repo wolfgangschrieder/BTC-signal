@@ -9,7 +9,7 @@ class FeatureEngine:
     """Pure, deterministic features. Missing inputs remain unavailable; never fabricated."""
     version = "features-v1"
 
-    def build(self, symbol: str, timestamp: datetime, closes: Sequence[float], volumes: Sequence[float] = (), highs: Sequence[float] = (), lows: Sequence[float] = ()) -> FeatureSnapshot:
+    def build(self, symbol: str, timestamp: datetime, closes: Sequence[float], volumes: Sequence[float] = (), highs: Sequence[float] = (), lows: Sequence[float] = (), orderbook=None) -> FeatureSnapshot:
         values: list[FeatureValue] = []
         def add(name, value, available=True, reason=None):
             values.append(FeatureValue(name, value, available, "derived", timestamp, reason))
