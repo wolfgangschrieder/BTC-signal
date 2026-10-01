@@ -5,7 +5,7 @@ from research_os.intelligence.probability import CalibrationSample
 def test_calibration_perfect():
     report=CalibrationLab().evaluate([CalibrationSample(.2,0),CalibrationSample(.8,1),CalibrationSample(.7,1),CalibrationSample(.3,0)])
     assert report.samples==4
-    assert report.brier==0.065
+    assert abs(report.brier-0.065)<1e-12
     assert report.expected_calibration_error>0
 
 def test_empty_calibration():
