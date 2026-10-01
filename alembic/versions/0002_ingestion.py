@@ -48,9 +48,6 @@ def upgrade() -> None:
         ["source", "event_time"],
         schema="raw",
     )
-    op.execute(
-        "SELECT create_hypertable('raw.quality_events', 'created_at', if_not_exists => TRUE)"
-    )
 
 
 def downgrade() -> None:
