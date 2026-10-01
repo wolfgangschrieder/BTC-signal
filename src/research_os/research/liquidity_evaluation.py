@@ -39,3 +39,15 @@ def split_evaluate(outcomes: Sequence[LiquidityReplayOutcome], horizon_minutes: 
     ordered=tuple(sorted(outcomes,key=lambda x:x.point.timestamp))
     cut=int(len(ordered)*train_ratio)
     return compare(ordered[:cut],horizon_minutes), compare(ordered[cut:],horizon_minutes)
+
+def compare_regimes(outcomes: Sequence[LiquidityReplayOutcome], horizon_minutes: int):
+    groups={}
+    for item in outcomes:
+        if item.point.stop_source != "liquidity":
+            label="no_liquidity"
+        elif item.point.liquidity_valid and item.point.liquidity_reference is not None:
+            label="persistent_or_clustered_liquidity"
+        else:
+            label="liquidity_unclassified"
+        groups.setdefault(label,[]).append(item)
+    return tuple(evaluate(groups[k],k,horizon_minutes) for k in sorted(groups))
