@@ -12,7 +12,9 @@ class CrossMarketFeatureEngine:
             if obs.point_in_time_available_at > cutoff or obs.timestamp > timestamp:
                 continue
             current=latest.get(obs.asset)
-            if current is None or obs.timestamp > current.timestamp:
+            if current is None or (obs.timestamp, obs.point_in_time_available_at, obs.source) > (
+                current.timestamp, current.point_in_time_available_at, current.source
+            ):
                 latest[obs.asset]=obs
 
         values={asset: obs.value for asset, obs in latest.items()}
