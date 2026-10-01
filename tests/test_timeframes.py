@@ -50,3 +50,14 @@ def test_unified_msv_namespaces_each_timeframe():
     assert "tf_1m_return_1" in state.values
     assert "tf_5m_return_1" in state.values
     assert state.availability["tf_1h_return_1"] is False
+
+def test_mtf_state_is_attached_and_persisted_in_msv():
+    from research_os.market.state_builder import MarketStateBuilder
+    source=bars(1500)
+    decision=datetime(2026,1,2,tzinfo=timezone.utc)
+    snapshot=MultiTimeframeFeatureEngine().build("BTCUSDT",source,decision,as_of=decision)
+    assert snapshot.state is not None
+    assert snapshot.state.version=="mtf-state-v1"
+    state=MarketStateBuilder().build_multi("BTCUSDT",decision,decision,decision,snapshot)
+    assert state.values["mtf_alignment"] in {"bullish","bearish","conflicting","neutral"}
+    assert state.availability["mtf_strength"] is True
