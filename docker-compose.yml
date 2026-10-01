@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: btc-signal-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: research_os
+      POSTGRES_USER: research_os
+      POSTGRES_PASSWORD: research_os
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U research_os -d research_os"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  postgres_data:
