@@ -30,3 +30,20 @@ def test_snapshot_features_are_numeric():
     values=snapshot_features(result)
     assert values["orderflow_delta"]==2
     assert values["orderflow_trade_count"]==2.0
+
+def test_price_delta_divergence_detected():
+    result=OrderFlowEngine().build(
+        [trade(1,1,"Sell"), trade(2,3,"Sell")],
+        datetime.fromtimestamp(2,tz=timezone.utc),
+        cumulative_delta_base=10,
+        previous_price=99.0,
+        previous_cumulative_delta=10.0,
+    )
+    assert result.price_delta_divergence == -1.0
+
+def test_absorption_metric_is_bounded():
+    result=OrderFlowEngine().build(
+        [trade(1,9,"Buy"), trade(2,1,"Sell")],
+        datetime.fromtimestamp(2,tz=timezone.utc),
+    )
+    assert 0.0 <= result.absorption <= 1.0
