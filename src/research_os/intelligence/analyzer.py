@@ -42,7 +42,8 @@ class MarketAnalyzer:
                 "positive/negative multi-bar return",
             )
 
-        # Higher-timeframe evidence stays separate from base 1m/5m evidence.\n        for timeframe, scale in (("15m", 0.01), ("1h", 0.02), ("4h", 0.04), ("1d", 0.08)):\n            name=f"tf_{timeframe}_return_1"\n            value=state.values.get(name)\n            if state.availability.get(name, False) and value is not None and value != 0:\n                add(name, EvidenceDirection.BULLISH if value > 0 else EvidenceDirection.BEARISH, value, min(abs(value) / scale, 1.0), f"{timeframe} directional context")\n\n        obi=state.values.get("orderbook_imbalance")
+        # Higher-timeframe evidence stays separate from base 1m/5m evidence.
+        for timeframe, scale in (("15m", 0.01), ("1h", 0.02), ("4h", 0.04), ("1d", 0.08)):\n            name=f"tf_{timeframe}_return_1"\n            value=state.values.get(name)\n            if state.availability.get(name, False) and value is not None and value != 0:\n                add(name, EvidenceDirection.BULLISH if value > 0 else EvidenceDirection.BEARISH, value, min(abs(value) / scale, 1.0), f"{timeframe} directional context")\n\n        obi=state.values.get("orderbook_imbalance")
         if obi is not None and state.availability.get("orderbook_imbalance", False):
             if obi > 0.05:
                 add("orderbook_imbalance", EvidenceDirection.BULLISH, obi, min(abs(obi), 1.0), "bid depth exceeds ask depth")
