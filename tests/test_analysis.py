@@ -36,3 +36,17 @@ def test_orderbook_imbalance_contributes_directional_evidence():
     evidence=[e for e in result.evidence if e.feature=="orderbook_imbalance"]
     assert evidence
     assert evidence[0].direction.value=="bullish"
+
+def test_higher_timeframe_evidence_is_auditable():
+    from research_os.market.state_vector import MarketStateVector
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    state=MarketStateVector.build(
+        "BTCUSDT",t,t,t,
+        {"return_1":0.001,"return_5":0.002,"tf_15m_return_1":0.01,"tf_1h_return_1":-0.02},
+        {"return_1":True,"return_5":True,"tf_15m_return_1":True,"tf_1h_return_1":True},
+        {},
+    )
+    result=MarketAnalyzer().analyze(state)
+    names={e.feature for e in result.evidence}
+    assert "tf_15m_return_1" in names and "tf_1h_return_1" in names
+    assert result.direction is EvidenceDirection.CONFLICTING
