@@ -65,9 +65,11 @@ class LiveSignalService:
                 if self.publisher: await self.publisher(event)
                 return
             if topic.startswith("allLiquidation."):
-                event=BybitNormalizer.liquidation(message); p=event.payload
-                self.liquidations.append((event.event_time,str(p["side"]),float(p["size"])))
-                if self.publisher: await self.publisher(event)
+                events=BybitNormalizer.liquidations(message)
+                for event in events:
+                    p=event.payload
+                    self.liquidations.append((event.event_time,str(p["side"]),float(p["size"])))
+                    if self.publisher: await self.publisher(event)
                 return
             if topic.startswith("kline."):
                 event=BybitNormalizer.kline(message); p=event.payload
