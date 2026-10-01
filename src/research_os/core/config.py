@@ -14,5 +14,7 @@ class Settings(BaseSettings):
     report_timezone:str="Europe/Moscow"; report_hour:int=20; report_minute:int=0
     fred_api_key:str=""
     cross_market_enabled:bool=False
+    cross_market_max_event_skew_seconds:float=300.0
+    cross_market_max_source_latency_skew_seconds:float=30.0
 @lru_cache
 def get_settings()->Settings: return Settings()
