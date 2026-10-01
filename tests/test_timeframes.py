@@ -61,3 +61,13 @@ def test_mtf_state_is_attached_and_persisted_in_msv():
     state=MarketStateBuilder().build_multi("BTCUSDT",decision,decision,decision,snapshot)
     assert state.values["mtf_alignment"] in {"bullish","bearish","conflicting","neutral"}
     assert state.availability["mtf_strength"] is True
+
+
+def test_mtf_excludes_bars_after_state_timestamp():
+    from datetime import datetime, timedelta, timezone
+    from research_os.features.timeframes import OHLCVBar, MultiTimeframeFeatureEngine
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    bars=[OHLCVBar(t+i*timedelta(minutes=1),100,101,99,100+i,10) for i in range(10)]
+    s=MultiTimeframeFeatureEngine().build("BTCUSDT",bars,t+timedelta(minutes=5),as_of=t+timedelta(minutes=10))
+    assert all(x.timestamp <= t+timedelta(minutes=5) for x in bars[:6])
+    assert s.snapshots
