@@ -26,6 +26,7 @@ def upgrade():
         sa.Column("mfe_pct", sa.Double(), nullable=False),
         sa.Column("mae_pct", sa.Double(), nullable=False),
         sa.Column("features", postgresql.JSONB(), nullable=False),
+        sa.Column("cross_market", postgresql.JSONB(), nullable=False),
         sa.Column("external_event_count", sa.Integer(), nullable=False),
         sa.Column("external_high_impact_count", sa.Integer(), nullable=False),
         sa.Column("external_weighted_sentiment", sa.Double(), nullable=True),
@@ -51,9 +52,5 @@ def upgrade():
 
 def downgrade():
     op.drop_constraint("uq_research_dataset_row", "research_dataset_rows", schema="research")
-    op.drop_index(
-        "ix_research_dataset_rows_version_time",
-        table_name="research_dataset_rows",
-        schema="research",
-    )
+    op.drop_index("ix_research_dataset_rows_version_time", table_name="research_dataset_rows", schema="research")
     op.drop_table("research_dataset_rows", schema="research")
