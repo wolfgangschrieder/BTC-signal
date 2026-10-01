@@ -30,4 +30,6 @@ class CrossMarketSnapshot:
     values: dict[str,float|None]
     availability: dict[str,bool]
     sources: dict[str,str]
-    version: str="cross-market-v1"
+    synchronized: bool = True
+    max_event_time_skew_seconds: float = 0.0
+    version: str="cross-market-v3"
