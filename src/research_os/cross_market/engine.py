@@ -5,7 +5,7 @@ from .state import classify
 class CrossMarketFeatureEngine:
     version="cross-market-v2"
 
-    def build(self,timestamp,observations,as_of=None,previous=None):
+    def build(self,timestamp,observations,as_of=None,previous=None,max_skew_seconds:float=300.0):
         cutoff=as_of or timestamp
         latest={}
         for obs in observations:
@@ -15,15 +15,20 @@ class CrossMarketFeatureEngine:
             if current is None or obs.timestamp > current.timestamp:
                 latest[obs.asset]=obs
         values={}; availability={}; sources={}
+        event_times=[obs.timestamp for obs in latest.values()]
+        skew_seconds=max((max(event_times)-min(event_times)).total_seconds(),0.0) if event_times else 0.0
+        synchronized=bool(event_times) and skew_seconds <= max_skew_seconds
+        if not synchronized:
+            availability={asset:False for asset in latest}
         for asset,obs in latest.items():
             values[asset]=obs.value
             availability[asset]=True
             sources[asset]=obs.source
-        if previous is not None:
+        if synchronized and previous is not None:
             values.update(returns(CrossMarketSnapshot(timestamp,values,availability,sources,self.version),previous))
             availability.update({f"{asset}_return": value is not None for asset,value in
                                  {k:v for k,v in values.items() if k.endswith("_return")}.items()})
-        return CrossMarketSnapshot(timestamp,values,availability,sources,self.version)
+        return CrossMarketSnapshot(timestamp,values,availability,sources,synchronized,skew_seconds,self.version)
 
     def state(self,snapshot):
         return classify(snapshot)
