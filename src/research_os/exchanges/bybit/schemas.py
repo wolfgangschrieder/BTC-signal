@@ -12,6 +12,14 @@ class BybitTrade(BaseModel):
     def event_time(self) -> datetime:
         return datetime.fromtimestamp(self.timestamp_ms / 1000, tz=__import__("datetime").timezone.utc)
 
+class BybitOrderBookMessage(BaseModel):
+    symbol: str
+    update_id: int = Field(ge=0)
+    sequence: int | None = Field(default=None, ge=0)
+    timestamp_ms: int = Field(gt=0)
+    bids: list[tuple[Decimal, Decimal]] = Field(default_factory=list)
+    asks: list[tuple[Decimal, Decimal]] = Field(default_factory=list)
+
 class BybitTicker(BaseModel):
     symbol: str
     last_price: Decimal = Field(gt=0)

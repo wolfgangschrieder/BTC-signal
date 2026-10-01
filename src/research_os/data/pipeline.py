@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from research_os.data.ingestion import EventIngestionService
 from research_os.data.models import QualityEvent, RawEvent
 from research_os.database.session import SessionLocal
+from research_os.market.store import NormalizedMarketDataStore
 
 
 class IngestionPipeline:
@@ -18,6 +19,7 @@ class IngestionPipeline:
         max_queue_size: int = 10_000,
     ) -> None:
         self.ingestion = ingestion or EventIngestionService()
+        self.normalized_store = NormalizedMarketDataStore()
         self.queue: asyncio.Queue[RawEvent] = asyncio.Queue(maxsize=max_queue_size)
         self.quality_events: asyncio.Queue[QualityEvent] = asyncio.Queue()
 
@@ -38,7 +40,9 @@ class IngestionPipeline:
     def _persist_one(self, event: RawEvent) -> None:
         with SessionLocal() as session:
             try:
-                self.ingestion.ingest(session, event)
+                event_id, _ = self.ingestion.ingest(session, event)
+                if event_id is not None:
+                    self.normalized_store.persist(session, event, event_id)
                 session.commit()
             except Exception:
                 session.rollback()
