@@ -35,25 +35,37 @@ def replay(symbol,start,end):
     print({"symbol":report.symbol,"dataset_version":report.dataset_version,"signals":report.signals,"resolved":report.resolved,"wins":report.wins,"losses":report.losses,"expired":report.expired,"win_rate":report.win_rate,"brier":report.brier,"log_loss":report.log_loss})
     return 0
 
-def state(symbol=None, history=False, timestamp=None, compare=None):
+def state(symbol=None,history=False,timestamp=None,compare=None):
     from research_os.market.state_repository import MarketStateRepository
     with SessionLocal() as session:
-        repo = MarketStateRepository()
-        target_symbol = symbol or "BTCUSDT"
+        repo=MarketStateRepository()
+        target_symbol=symbol or "BTCUSDT"
+        if compare:
+            left=datetime.fromisoformat(timestamp) if timestamp else datetime.now().astimezone()
+            right=datetime.fromisoformat(compare)
+            result=repo.compare(session,target_symbol,left,right)
+            print(result or {"status":"not_found"})
+            return 0
         if timestamp:
-            row = repo.at(session, target_symbol, datetime.fromisoformat(timestamp))
-            print(dict(row) if row else {"status": "not_found"})
+            row=repo.at(session,target_symbol,datetime.fromisoformat(timestamp))
+            print(dict(row) if row else {"status":"not_found"})
             return 0
         if history:
-            print([dict(row) for row in repo.history(session, target_symbol)])
+            print([dict(row) for row in repo.history(session,target_symbol)])
             return 0
-        row = repo.history(session, target_symbol, 1)
-        print(dict(row[0]) if row else {"status": "not_found"})
+        row=repo.history(session,target_symbol,1)
+        print(dict(row[0]) if row else {"status":"not_found"})
     return 0
 
 def main():
-    parser=argparse.ArgumentParser(prog="research-os"); sub=parser.add_subparsers(dest="command",required=True)
-    sub.add_parser("health"); sub.add_parser("live"); st=sub.add_parser("state"); st.add_argument("--symbol",default="BTCUSDT"); st.add_argument("--history",action="store_true"); st.add_argument("--timestamp"); st.add_argument("--compare")
+    parser=argparse.ArgumentParser(prog="research-os")
+    sub=parser.add_subparsers(dest="command",required=True)
+    sub.add_parser("health"); sub.add_parser("live")
+    st=sub.add_parser("state")
+    st.add_argument("--symbol",default="BTCUSDT")
+    st.add_argument("--history",action="store_true")
+    st.add_argument("--timestamp")
+    st.add_argument("--compare",help="second timestamp to compare with --timestamp or current time")
     rp=sub.add_parser("replay"); rp.add_argument("--symbol",default="BTCUSDT"); rp.add_argument("--start",required=True); rp.add_argument("--end",required=True)
     cp=sub.add_parser("calibration"); cp.add_argument("--symbol",default=None); cp.add_argument("--start",default=None); cp.add_argument("--end",default=None)
     rg=sub.add_parser("regime"); rg.add_argument("--symbol",default="BTCUSDT"); rg.add_argument("--start",required=True); rg.add_argument("--end",required=True)
