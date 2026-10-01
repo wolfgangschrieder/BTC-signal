@@ -1,0 +1,31 @@
+from __future__ import annotations
+from research_os.intelligence.models import AnalysisResult, Evidence, EvidenceDirection
+from research_os.market.state_vector import MarketStateVector
+
+class MarketAnalyzer:
+    """Converts available MSV features into auditable evidence; no probability is produced."""
+    version="analysis-v1"
+    def analyze(self, state: MarketStateVector) -> AnalysisResult:
+        ev=[]
+        def add(name, direction, value, strength, reason):
+            if state.availability.get(name,False) and value is not None:
+                ev.append(Evidence(name,direction,min(1.0,max(0.0,strength)),value,state.timestamp,"msv",1.0,reason))
+        r=state.values.get("return_1")
+        if r is not None:
+            add("return_1", EvidenceDirection.BULLISH if r>0 else EvidenceDirection.BEARISH, r, min(abs(r)/0.01,1), "positive/negative short-term return")
+        r5=state.values.get("return_5")
+        if r5 is not None:
+            add("return_5", EvidenceDirection.BULLISH if r5>0 else EvidenceDirection.BEARISH, r5, min(abs(r5)/0.03,1), "positive/negative multi-bar return")
+        vol=state.values.get("realized_vol")
+        if vol is not None:
+            add("realized_vol", EvidenceDirection.NEUTRAL, vol, min(vol/0.02,1), "volatility is state information, not direction")
+        bull=sum(e.strength*e.reliability for e in ev if e.direction is EvidenceDirection.BULLISH)
+        bear=sum(e.strength*e.reliability for e in ev if e.direction is EvidenceDirection.BEARISH)
+        directional=[e for e in ev if e.direction in (EvidenceDirection.BULLISH,EvidenceDirection.BEARISH)]
+        conflicts=sum(1 for e in directional if (e.direction is EvidenceDirection.BULLISH and bear>bull) or (e.direction is EvidenceDirection.BEARISH and bull>bear))
+        if not directional: direction=EvidenceDirection.NEUTRAL
+        elif abs(bull-bear)<0.1: direction=EvidenceDirection.CONFLICTING
+        else: direction=EvidenceDirection.BULLISH if bull>bear else EvidenceDirection.BEARISH
+        sufficient=bool(directional) and all(state.availability.get(k,False) for k in ("return_1","return_5"))
+        reason="insufficient directional evidence" if not sufficient else ("conflicting directional evidence" if direction is EvidenceDirection.CONFLICTING else "directional evidence aggregated from available features")
+        return AnalysisResult(state.symbol,state.timestamp,direction,tuple(ev),bull,bear,conflicts,sufficient,reason)
