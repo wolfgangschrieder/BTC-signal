@@ -10,3 +10,9 @@ def test_trade_normalization_sets_pit_to_ingestion_time():
     assert event.symbol == "BTCUSDT"
     assert event.point_in_time_available_at == ingestion
     assert event.payload["price"] == "100000"
+
+def test_liquidation_normalizer():
+    event=BybitNormalizer.liquidation({"topic":"allLiquidation.BTCUSDT","ts":1000,"data":[{"T":900,"s":"BTCUSDT","S":"Buy","v":"2.5","p":"60000"}]})
+    assert event.symbol=="BTCUSDT"
+    assert event.payload["side"]=="Buy"
+    assert event.payload["size"]=="2.5"

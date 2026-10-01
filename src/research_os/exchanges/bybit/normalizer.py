@@ -10,9 +10,10 @@ class BybitNormalizer:
         return RawEvent(source="bybit",event_type=EventType.TRADE,symbol=model.symbol,event_time=model.event_time(),ingestion_time=ingested,point_in_time_available_at=ingested,payload=model.model_dump(mode="json"))
     @staticmethod
     def ticker(raw,ingestion_time=None):
-        model=BybitTicker.model_validate(raw["data"]); ingested=ingestion_time or datetime.now(timezone.utc)
+        data=raw["data"]; data=data[0] if isinstance(data,list) else data
+        item={"symbol":data["symbol"],"last_price":data["lastPrice"],"bid_price":data.get("bid1Price"),"ask_price":data.get("ask1Price"),"funding_rate":data.get("fundingRate"),"open_interest":data.get("openInterest"),"next_funding_time_ms":int(data["nextFundingTime"]) if data.get("nextFundingTime") else None,"timestamp_ms":int(raw["ts"])}
+        model=BybitTicker.model_validate(item); ingested=ingestion_time or datetime.now(timezone.utc)
         return RawEvent(source="bybit",event_type=EventType.TICKER,symbol=model.symbol,event_time=datetime.fromtimestamp(model.timestamp_ms/1000,tz=timezone.utc),ingestion_time=ingested,point_in_time_available_at=ingested,payload=model.model_dump(mode="json"))
-    @staticmethod
     def kline(raw,ingestion_time=None):
         data=raw["data"]; item=data[0] if isinstance(data,list) else data
         item={**item,"symbol":raw["topic"].rsplit(".",1)[-1],"interval":str(item["interval"]),"start_ms":int(item["start"]),"timestamp_ms":int(raw["ts"])}
@@ -26,3 +27,41 @@ class BybitNormalizer:
         payload={"symbol":str(data["s"]),"update_id":int(data["u"]),"sequence":int(data["seq"]) if data.get("seq") is not None else None,"timestamp_ms":ts,"bids":data.get("b",[]),"asks":data.get("a",[]),"message_type":raw.get("type"),"topic":raw.get("topic")}
         et=EventType.ORDERBOOK_SNAPSHOT if raw.get("type")=="snapshot" else EventType.ORDERBOOK_UPDATE
         return RawEvent(source="bybit",event_type=et,symbol=payload["symbol"],event_time=datetime.fromtimestamp(ts/1000,tz=timezone.utc),ingestion_time=ingested,point_in_time_available_at=ingested,payload=payload)
+    @staticmethod
+    def funding_history(raw, ingestion_time=None):
+        ingested=ingestion_time or datetime.now(timezone.utc)
+        events=[]
+        for item in raw.get("result",{}).get("list",[]):
+            ts=int(item["fundingRateTimestamp"])
+            events.append(RawEvent(source="bybit",event_type=EventType.FUNDING,symbol=str(item["symbol"]),event_time=datetime.fromtimestamp(ts/1000,tz=timezone.utc),ingestion_time=ingested,point_in_time_available_at=ingested,payload={"symbol":str(item["symbol"]),"funding_rate":str(item["fundingRate"]),"timestamp_ms":ts}))
+        return events
+
+    @staticmethod
+    def open_interest_history(raw, symbol="BTCUSDT", ingestion_time=None):
+        ingested=ingestion_time or datetime.now(timezone.utc)
+        events=[]
+        for item in raw.get("result",{}).get("list",[]):
+            ts=int(item["timestamp"])
+            events.append(RawEvent(source="bybit",event_type=EventType.OPEN_INTEREST,symbol=symbol,event_time=datetime.fromtimestamp(ts/1000,tz=timezone.utc),ingestion_time=ingested,point_in_time_available_at=ingested,payload={"symbol":symbol,"open_interest":str(item["openInterest"]),"timestamp_ms":ts}))
+        return events
+
+    @staticmethod
+    def liquidations(raw, ingestion_time=None):
+        data=raw["data"]
+        items=data if isinstance(data,list) else [data]
+        ingested=ingestion_time or datetime.now(timezone.utc)
+        events=[]
+        for item in items:
+            ts=int(item.get("T",raw["ts"]))
+            symbol=str(item["s"])
+            events.append(RawEvent(source="bybit",event_type=EventType.LIQUIDATION,symbol=symbol,event_time=datetime.fromtimestamp(ts/1000,tz=timezone.utc),ingestion_time=ingested,point_in_time_available_at=ingested,payload={"symbol":symbol,"side":str(item["S"]),"size":str(item["v"]),"price":str(item["p"]),"timestamp_ms":ts}))
+        return events
+
+    @staticmethod
+    def liquidation(raw,ingestion_time=None):
+        data=raw["data"]
+        items=data if isinstance(data,list) else [data]
+        item=items[0]
+        ingested=ingestion_time or datetime.now(timezone.utc)
+        symbol=str(item["s"]); side=str(item["S"]); size=str(item["v"]); price=str(item["p"]); ts=int(item.get("T",raw["ts"]))
+        return RawEvent(source="bybit",event_type=EventType.LIQUIDATION,symbol=symbol,event_time=datetime.fromtimestamp(ts/1000,tz=timezone.utc),ingestion_time=ingested,point_in_time_available_at=ingested,payload={"symbol":symbol,"side":side,"size":size,"price":price,"timestamp_ms":ts})

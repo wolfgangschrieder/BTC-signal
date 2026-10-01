@@ -23,6 +23,9 @@ class BybitTicker(BaseModel):
     last_price: Decimal = Field(gt=0)
     bid_price: Decimal|None = Field(default=None,gt=0)
     ask_price: Decimal|None = Field(default=None,gt=0)
+    funding_rate: Decimal|None = None
+    open_interest: Decimal|None = Field(default=None,ge=0)
+    next_funding_time_ms: int|None = Field(default=None,gt=0)
     timestamp_ms: int = Field(gt=0)
 
 class BybitKline(BaseModel):

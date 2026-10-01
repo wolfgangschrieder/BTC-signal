@@ -48,3 +48,23 @@ class BybitRestClient:
         finally:
             if owns_client:
                 await client.aclose()
+
+    async def get_funding_history(self, category: str = "linear", symbol: str = "BTCUSDT", limit: int = 200) -> dict[str, Any]:
+        return await self._get("/v5/market/funding/history", {"category":category,"symbol":symbol,"limit":limit})
+
+    async def get_open_interest(self, category: str = "linear", symbol: str = "BTCUSDT", interval_time: str = "5min", limit: int = 50) -> dict[str, Any]:
+        return await self._get("/v5/market/open-interest", {"category":category,"symbol":symbol,"intervalTime":interval_time,"limit":limit})
+
+    async def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        owns_client=self._client is None
+        client=self._client or httpx.AsyncClient(base_url=self.BASE_URL, timeout=10.0)
+        try:
+            response=await client.get(path,params=params)
+            response.raise_for_status()
+            payload=response.json()
+            if payload.get("retCode") != 0:
+                raise RuntimeError(f"Bybit API error: {payload.get('retCode')}: {payload.get('retMsg')}")
+            return payload
+        finally:
+            if owns_client:
+                await client.aclose()

@@ -38,7 +38,7 @@ class MultiTimeframeAlignment:
     bearish_timeframes: tuple[Timeframe,...]
     conflicting: bool
     state: MultiTimeframeState | None = None
-    version: str="mtf-alignment-v2"
+    version: str="mtf-alignment-v1"
 
 @dataclass(frozen=True)
 class MultiTimeframeState:

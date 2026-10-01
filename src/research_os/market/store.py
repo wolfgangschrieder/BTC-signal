@@ -3,6 +3,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 from research_os.data.models import EventType, RawEvent
 from research_os.market.models import Trade, Candle, OrderBookSnapshot, OrderBookUpdate, MarketSnapshot
+from research_os.derivatives.models import FundingRate, OpenInterest, Liquidation
 
 class NormalizedMarketDataStore:
     """Projects validated RawEvents into typed time-series tables in the same transaction."""
@@ -25,4 +26,14 @@ class NormalizedMarketDataStore:
         elif event.event_type is EventType.TICKER:
             last=Decimal(str(p["last_price"])); bid=Decimal(str(p["bid_price"])) if p.get("bid_price") is not None else None; ask=Decimal(str(p["ask_price"])) if p.get("ask_price") is not None else None
             mid=(bid+ask)/2 if bid is not None and ask is not None else None; spread=ask-bid if bid is not None and ask is not None else None
-            session.add(MarketSnapshot(**common,last_price=last,bid=bid,ask=ask,mid_price=mid,spread=spread,volume_24h=None,open_interest=None,funding_rate=None,orderbook_valid=None))
+            session.add(MarketSnapshot(**common,last_price=last,bid=bid,ask=ask,mid_price=mid,spread=spread,volume_24h=None,open_interest=Decimal(str(p["open_interest"])) if p.get("open_interest") is not None else None,funding_rate=Decimal(str(p["funding_rate"])) if p.get("funding_rate") is not None else None,orderbook_valid=None))
+            if p.get("funding_rate") is not None:
+                session.add(FundingRate(**common,funding_rate=Decimal(str(p["funding_rate"])),funding_time=event.event_time))
+            if p.get("open_interest") is not None:
+                session.add(OpenInterest(**common,open_interest=Decimal(str(p["open_interest"]))))
+        elif event.event_type is EventType.FUNDING:
+            session.add(FundingRate(**common, funding_rate=Decimal(str(p["funding_rate"])), funding_time=event.event_time))
+        elif event.event_type is EventType.OPEN_INTEREST:
+            session.add(OpenInterest(**common, open_interest=Decimal(str(p["open_interest"]))))
+        elif event.event_type is EventType.LIQUIDATION:
+            session.add(Liquidation(**common,side=str(p["side"]),price=Decimal(str(p["price"])),size=Decimal(str(p["size"]))))
