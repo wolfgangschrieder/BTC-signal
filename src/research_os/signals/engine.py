@@ -3,6 +3,7 @@ from research_os.intelligence.models import AnalysisResult, EvidenceDirection
 from research_os.intelligence.probability import ProbabilityResult
 from research_os.signals.models import SignalDirection, SignalLevels, SignalResult
 from research_os.signals.risk import RiskEngine, LiquidityLevel
+from research_os.features.liquidity import LiquidityCluster
 
 class SignalEngine:
     version="signal-v1"
@@ -12,7 +13,7 @@ class SignalEngine:
         self.min_probability=min_probability
         self.min_rr=min_rr
 
-    def build(self, analysis: AnalysisResult, probability: ProbabilityResult, price: float, atr: float | None = None, liquidity_levels: tuple[LiquidityLevel,...] = ()) -> SignalResult:
+    def build(self, analysis: AnalysisResult, probability: ProbabilityResult, price: float, atr: float | None = None, liquidity_levels: tuple[LiquidityLevel,...] = (), liquidity_clusters: tuple[LiquidityCluster,...] = ()) -> SignalResult:
         if price <= 0:
             raise ValueError("price must be positive")
 
@@ -42,7 +43,7 @@ class SignalEngine:
             )
 
         entry_min,entry_max=price-0.15*atr,price+0.15*atr
-        levels=self.risk.build_levels(direction.value,price,atr,liquidity_levels)
+        levels=self.risk.build_levels(direction.value,price,atr,liquidity_levels,liquidity_clusters)
         stop,t1,t2,t3=levels.stop_loss,levels.tp1,levels.tp2,levels.tp3
 
         risk=abs(price-stop)
