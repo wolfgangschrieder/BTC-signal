@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from math import log
 from statistics import mean, pstdev
 from collections.abc import Sequence
@@ -41,4 +41,28 @@ class FeatureEngine:
             add("atr_14", mean(true_ranges[-period:]) if period else None, bool(period), "need valid OHLC history")
         else:
             add("atr_14", None, False, "OHLC history unavailable")
+        if orderbook is not None:
+            age_ms = None
+            if getattr(orderbook, "last_event_time_ms", 0):
+                age_ms = max(0, int(timestamp.timestamp() * 1000) - int(orderbook.last_event_time_ms))
+            fresh = bool(getattr(orderbook, "valid", False)) and age_ms is not None and age_ms <= 5000
+            if fresh and orderbook.bids and orderbook.asks:
+                best_bid = float(orderbook.bids[0].price)
+                best_ask = float(orderbook.asks[0].price)
+                mid = (best_bid + best_ask) / 2
+                spread = best_ask - best_bid
+                bid_depth = sum(float(x.size) for x in orderbook.bids)
+                ask_depth = sum(float(x.size) for x in orderbook.asks)
+                total_depth = bid_depth + ask_depth
+                imbalance = (bid_depth - ask_depth) / total_depth if total_depth else None
+                add("orderbook_mid", mid, True)
+                add("orderbook_spread", spread, True)
+                add("orderbook_imbalance", imbalance, imbalance is not None, "zero total depth" if imbalance is None else None)
+            else:
+                reason = "orderbook unavailable"
+                if getattr(orderbook, "valid", False) and age_ms is not None and age_ms > 5000:
+                    reason = "orderbook stale"
+                add("orderbook_mid", None, False, reason)
+                add("orderbook_spread", None, False, reason)
+                add("orderbook_imbalance", None, False, reason)
         return FeatureSnapshot(symbol, timestamp, tuple(values), self.version)
