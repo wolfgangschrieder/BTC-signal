@@ -61,3 +61,15 @@ class LiquidityEngine:
         return LiquidityState(
             timestamp_ms or orderbook_state.last_event_time_ms,True,
             tuple(bids),tuple(asks),bids[0] if bids else None,asks[0] if asks else None)
+
+
+def snapshot_features(state: LiquidityState) -> dict[str, float | None]:
+    bid=state.strongest_bid; ask=state.strongest_ask
+    return {
+        "liquidity_strongest_bid_size": bid.total_size if bid else None,
+        "liquidity_strongest_ask_size": ask.total_size if ask else None,
+        "liquidity_strongest_bid_distance_bps": bid.distance_bps if bid else None,
+        "liquidity_strongest_ask_distance_bps": ask.distance_bps if ask else None,
+        "liquidity_bid_cluster_count": float(len(state.bid_clusters)) if state.valid else None,
+        "liquidity_ask_cluster_count": float(len(state.ask_clusters)) if state.valid else None,
+    }
