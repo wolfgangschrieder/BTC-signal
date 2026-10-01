@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Sequence
 
 from research_os.intelligence.events import ExternalEvent, ExternalEventEngine
@@ -109,27 +109,25 @@ class ExternalEventDatasetBuilder:
             rows=tuple(rows),
             decision_times=len(ordered_decisions),
             decisions_with_events=decisions_with_events,
-            skipped_events=max(0, len(events) - len({(e.source, e.event_id) for e in events})),
+            skipped_events=max(
+                0,
+                len(events) - len({(e.source, e.event_id) for e in events}),
+            ),
         )
 
     @staticmethod
     def audit_pit(
         dataset: ExternalEventDataset,
     ) -> tuple[ExternalEventPITViolation, ...]:
-        by_decision = {}
+        violations: list[ExternalEventPITViolation] = []
         for row in dataset.rows:
-            by_decision.setdefault(row.timestamp, []).append(row)
-
-        violations = []
-        for decision_time, rows in by_decision.items():
-            for row in rows:
-                if row.point_in_time_available_at > decision_time:
-                    violations.append(
-                        ExternalEventPITViolation(
-                            decision_time,
-                            row.event_id,
-                            row.source,
-                            row.point_in_time_available_at,
-                        )
+            if row.point_in_time_available_at > row.timestamp:
+                violations.append(
+                    ExternalEventPITViolation(
+                        row.timestamp,
+                        row.event_id,
+                        row.source,
+                        row.point_in_time_available_at,
                     )
+                )
         return tuple(violations)
