@@ -5,7 +5,7 @@ from research_os.features.models import FeatureSnapshot
 
 class MarketStateBuilder:
     """Builds a reproducible MSV from features and explicit availability metadata."""
-    def build(self, symbol: str, timestamp: datetime, decision_time: datetime, pit: datetime, snapshot: FeatureSnapshot, data_quality: dict[str,str] | None = None) -> MarketStateVector:
+    def build(self, symbol: str, timestamp: datetime, decision_time: datetime, pit: datetime, snapshot: FeatureSnapshot, data_quality: dict[str,str] | None = None, extra_values: dict[str, float | None] | None = None, extra_availability: dict[str, bool] | None = None) -> MarketStateVector:
         values={f.name:f.value for f in snapshot.features}
         availability={f.name:f.available for f in snapshot.features}
         if snapshot.state is not None:
@@ -27,7 +27,7 @@ class MarketStateBuilder:
         return MarketStateVector.build(symbol,timestamp,decision_time,pit,values,availability,quality,snapshot.version)
 
 
-    def build_multi(self, symbol: str, timestamp: datetime, decision_time: datetime, pit: datetime, snapshot, base_snapshot: FeatureSnapshot | None = None, data_quality: dict[str,str] | None = None) -> MarketStateVector:
+    def build_multi(self, symbol: str, timestamp: datetime, decision_time: datetime, pit: datetime, snapshot, base_snapshot: FeatureSnapshot | None = None, data_quality: dict[str,str] | None = None, extra_values: dict[str, float | None] | None = None, extra_availability: dict[str, bool] | None = None) -> MarketStateVector:
         """Build one unified MSV with namespaced multi-timeframe features."""
         availability={}
         values={}
