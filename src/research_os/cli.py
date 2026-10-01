@@ -36,18 +36,19 @@ def replay(symbol,start,end):
     return 0
 
 def state(symbol=None, history=False, timestamp=None, compare=None):
-    from research_os.market.state_vector import MarketStateVector
-    if timestamp:
-        target = datetime.fromisoformat(timestamp)
-        print({"symbol": symbol or "BTCUSDT", "timestamp": target.isoformat(), "status": "lookup_requires_persisted_provider"})
-        return 0
-    if compare:
-        print({"compare": compare, "status": "comparison_requires_persisted_provider"})
-        return 0
-    if history:
-        print({"symbol": symbol or "BTCUSDT", "history": [], "status": "no state repository configured"})
-        return 0
-    print({"symbol": symbol or "BTCUSDT", "status": "state provider requires live/persisted data"})
+    from research_os.market.state_repository import MarketStateRepository
+    with SessionLocal() as session:
+        repo = MarketStateRepository()
+        target_symbol = symbol or "BTCUSDT"
+        if timestamp:
+            row = repo.at(session, target_symbol, datetime.fromisoformat(timestamp))
+            print(dict(row) if row else {"status": "not_found"})
+            return 0
+        if history:
+            print([dict(row) for row in repo.history(session, target_symbol)])
+            return 0
+        row = repo.history(session, target_symbol, 1)
+        print(dict(row[0]) if row else {"status": "not_found"})
     return 0
 
 def main():
