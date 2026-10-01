@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from math import isfinite
 from research_os.signals.models import SignalDirection, SignalResult
 
 @dataclass(frozen=True)
@@ -16,12 +17,36 @@ class SignalGuard:
     max_latency_ms: float=500.0
     max_spread_bps: float=10.0
     max_orderbook_age_ms: int=5000
+    min_probability: float=0.70
+    min_expected_value: float=0.0
+    min_rr: float=1.5
     last_key: str|None=None
     last_sent_at: datetime|None=None
 
     def validate(self, signal: SignalResult, context: SignalExecutionContext | None = None) -> tuple[bool, tuple[str,...]]:
         if signal.direction is SignalDirection.NONE:
             return False, ("signal direction is none",)
+        if not isfinite(signal.probability) or not 0.0 <= signal.probability <= 1.0:
+            return False, ("invalid directional probability",)
+        if not isfinite(signal.no_signal_probability) or not 0.0 <= signal.no_signal_probability <= 1.0:
+            return False, ("invalid no-signal probability",)
+        if signal.probability + signal.no_signal_probability > 1.0 + 1e-9:
+            return False, ("probability mass exceeds one",)
+        if signal.probability < self.min_probability:
+            return False, ("probability below guard threshold",)
+        if not isfinite(signal.expected_value) or signal.expected_value < self.min_expected_value:
+            return False, ("expected value below guard threshold",)
+        if not isfinite(signal.leverage) or signal.leverage <= 0:
+            return False, ("invalid leverage",)
+        if signal.levels is None:
+            return False, ("signal levels are missing",)
+        if not all(isfinite(x) and x > 0 for x in (
+            signal.levels.entry_min, signal.levels.entry_max, signal.levels.stop_loss,
+            signal.levels.tp1, signal.levels.tp2, signal.levels.tp3,
+        )):
+            return False, ("signal levels are invalid",)
+        if min(signal.levels.rr_tp1, signal.levels.rr_tp2, signal.levels.rr_tp3) < self.min_rr:
+            return False, ("risk/reward below guard threshold",)
         if context is not None:
             if context.latency_ms is not None and context.latency_ms > self.max_latency_ms:
                 return False, ("socket latency above guard threshold",)
