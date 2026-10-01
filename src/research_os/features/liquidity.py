@@ -103,4 +103,8 @@ def snapshot_features(state: LiquidityState) -> dict[str, float | None]:
         "liquidity_strongest_ask_distance_bps": ask.distance_bps if ask else None,
         "liquidity_bid_cluster_count": float(len(state.bid_clusters)) if state.valid else None,
         "liquidity_ask_cluster_count": float(len(state.ask_clusters)) if state.valid else None,
+        "liquidity_strongest_bid_persistent": 1.0 if bid and bid.persistent else (0.0 if bid else None),
+        "liquidity_strongest_ask_persistent": 1.0 if ask and ask.persistent else (0.0 if ask else None),
+        "liquidity_strongest_bid_lifetime_ms": float(bid.lifetime_ms) if bid else None,
+        "liquidity_strongest_ask_lifetime_ms": float(ask.lifetime_ms) if ask else None,
     }
