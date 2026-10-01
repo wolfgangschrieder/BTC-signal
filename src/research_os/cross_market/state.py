@@ -21,11 +21,12 @@ def _sign(value, positive, negative):
 
 def classify(snapshot: CrossMarketSnapshot) -> CrossMarketState:
     v=snapshot.values
-    keys=("DXY_return","NASDAQ_return","SPX_return","VIX_return")
+    keys=("DOLLAR_BROAD_return","DXY_return","NASDAQ_return","SPX_return","VIX_return")
     available_count=sum(snapshot.availability.get(k,False) and v.get(k) is not None for k in keys)
     if not available_count:
         return CrossMarketState("unknown","unknown","unknown","unknown","unknown","unknown",0.0,False)
-    dollar=_sign(v.get("DXY_return"),"strong","weak")
+    dollar_value=v.get("DOLLAR_BROAD_return") if v.get("DOLLAR_BROAD_return") is not None else v.get("DXY_return")
+    dollar=_sign(dollar_value,"strong","weak")
     volatility=_sign(v.get("VIX_return"),"rising","falling")
     eq=[v.get("NASDAQ_return"),v.get("SPX_return")]
     eq=[x for x in eq if x is not None]
