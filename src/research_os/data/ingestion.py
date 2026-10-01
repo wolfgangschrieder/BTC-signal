@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from research_os.data.models import RawEvent, QualityEvent
+from research_os.data.models import QualityCode, QualityEvent, RawEvent
 from research_os.data.quality import DataQualityEngine
 from research_os.data.raw_store import RawEventStore
 
@@ -43,7 +43,7 @@ class EventIngestionService:
         fingerprint = event_fingerprint(event)
         if self._exists(session, fingerprint):
             duplicate = QualityEvent(
-                code="duplicate",
+                code=QualityCode.DUPLICATE,
                 source=event.source,
                 event_time=event.event_time,
                 message="Duplicate raw event fingerprint",
