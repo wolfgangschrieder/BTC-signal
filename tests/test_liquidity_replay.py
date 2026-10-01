@@ -22,3 +22,20 @@ def test_replay_resolves_tp():
     assert out is not None
     assert out.status=="win"
     assert out.realized_return_pct>0
+
+def test_replay_dataset_is_chronological():
+    from research_os.research.liquidity_replay import build_dataset, chronological_split, summarize_replay, LiquidityReplayPoint
+    ts=datetime(2026,1,1,tzinfo=timezone.utc)
+    points=[
+        LiquidityReplayPoint(ts,100,2,False,"atr",98,101,None),
+        LiquidityReplayPoint(ts+timedelta(minutes=1),100,2,False,"atr",98,101,None),
+    ]
+    candles=[]
+    for i in range(1,61):
+        candles.append(SimpleNamespace(timestamp=ts+timedelta(minutes=i),high=102,low=99,close=101))
+    candles += [SimpleNamespace(timestamp=ts+timedelta(minutes=61+i),high=102,low=99,close=101) for i in range(60)]
+    dataset=build_dataset(points,candles,"long",train_ratio=.5)
+    train,test=chronological_split(dataset)
+    assert len(train)==1 and len(test)==1
+    assert train[0].point.timestamp < test[0].point.timestamp
+    assert summarize_replay(dataset.outcomes)["sample_size"]==2
