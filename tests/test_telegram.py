@@ -10,8 +10,9 @@ def make_signal():
 def test_signal_contains_confirmation_buttons():
     s=make_signal()
     m=TelegramFormatter().format(s)
-    assert ("confirm:"+s.signal_id) in dict(m.buttons)
-    assert ("cancel:"+s.signal_id) in dict(m.buttons)
+    callbacks=dict(m.buttons)
+    assert callbacks["✅ Согласиться"] == "confirm:"+s.signal_id
+    assert callbacks["❌ Отмена"] == "cancel:"+s.signal_id
 
 def test_callback_parser():
     assert TelegramFormatter.callback_action("confirm:abc") == ("confirm","abc")
