@@ -4,6 +4,7 @@ from research_os.features.timeframes import OHLCVBar, MultiTimeframeFeatureEngin
 from collections.abc import Awaitable,Callable
 from datetime import datetime,timezone
 import asyncio
+from time import perf_counter
 from research_os.exchanges.bybit.normalizer import BybitNormalizer
 from research_os.exchanges.bybit.orderbook import OrderBook, OrderBookError
 from research_os.exchanges.bybit.client import BybitRestClient
@@ -68,7 +69,7 @@ class LiveSignalService:
         signal_engine = SignalEngine(
             min_probability=float(getattr(config, "signal_min_probability", 0.70)) if config is not None else 0.70
         )
-        self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),signal_engine,TelegramFormatter(),guard_instance)
+        self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),signal_engine,TelegramFormatter(),guard_instance,self.latency)
         self.outcomes=SignalOutcomeRepository(); self.states=MarketStateRepository()
         self.websocket=BybitWebSocket(
             [f"kline.{interval}.{symbol}",f"tickers.{symbol}",f"orderbook.50.{symbol}",f"publicTrade.{symbol}",f"allLiquidation.{symbol}"],
@@ -107,7 +108,9 @@ class LiveSignalService:
                 self.derivatives_funding=float(event.payload["funding_rate"]) if event.payload.get("funding_rate") is not None else self.derivatives_funding
                 self.derivatives_oi=float(event.payload["open_interest"]) if event.payload.get("open_interest") is not None else self.derivatives_oi
             elif topic.startswith("orderbook."):
+                _stage_start=perf_counter()
                 quality=self.orderbook.apply(message)
+                self.latency.observe("orderbook_apply", (perf_counter()-_stage_start)*1000.0)
                 if quality is not None:
                     if quality.code.value in {"orderbook_gap","impossible_value","malformed","stale"}:
                         await self._recover_orderbook()
@@ -122,7 +125,9 @@ class LiveSignalService:
                         self._last_liquidity_compute_monotonic=now_monotonic
                 else:
                     self._liquidity_state=None
+                _stage_start=perf_counter()
                 event=BybitNormalizer.orderbook(message)
+                self.latency.observe("orderbook_normalize", (perf_counter()-_stage_start)*1000.0)
                 event.payload["valid"]=self.orderbook.state.valid
                 self._enqueue_event(event)
                 return
@@ -136,7 +141,9 @@ class LiveSignalService:
                 snap_task=asyncio.to_thread(self.features.build,self.symbol,event.event_time,closes,highs=highs,lows=lows,orderbook=book_state)
                 mtf_task=asyncio.to_thread(self.mtf.build,self.symbol,bars,event.event_time,as_of=now)
                 flow_task=self.orderflow.build_async(trades,event.event_time,cumulative_delta_base=0.0,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
+                _stage_start=perf_counter()
                 snap,mtf_snapshot,flow=await asyncio.gather(snap_task,mtf_task,flow_task)
+                self.latency.observe("feature_bundle", (perf_counter()-_stage_start)*1000.0)
                 flow_values=snapshot_features(flow)
                 flow_values["orderflow_cumulative_delta"]=self.cumulative_delta
                 cutoff=event.event_time.timestamp()-3600
@@ -169,7 +176,9 @@ class LiveSignalService:
                 extra.update(liquidity_values)
                 availability={key: ((flow.available and value is not None) if key.startswith("orderflow_") else (deriv.available and value is not None)) for key,value in extra.items()}
                 for key,value in liquidity_values.items(): availability[key]=liquidity_state.valid and value is not None
+                _stage_start=perf_counter()
                 state=await self.builder.build_multi_async(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap,extra_values=extra,extra_availability=availability)
+                self.latency.observe("state_build", (perf_counter()-_stage_start)*1000.0)
                 self.previous_derivatives_price=float(event.payload["close"])
                 self.previous_funding=self.derivatives_funding
                 self.previous_oi=self.derivatives_oi
