@@ -1,5 +1,6 @@
 from __future__ import annotations
 from collections import deque
+from research_os.features.timeframes import OHLCVBar, MultiTimeframeFeatureEngine
 from collections.abc import Awaitable,Callable
 from datetime import datetime,timezone
 import asyncio
@@ -31,7 +32,8 @@ class LiveSignalService:
     def __init__(self,symbol="BTCUSDT",interval="1",publisher:EventPublisher|None=None,telegram:TelegramClient|None=None,config=None):
         self.symbol=symbol; self.interval=interval; self.publisher=publisher
         self.telegram=telegram
-        self.closes=deque(maxlen=200); self.highs=deque(maxlen=200); self.lows=deque(maxlen=200)
+        self.closes=deque(maxlen=2000); self.highs=deque(maxlen=2000); self.lows=deque(maxlen=2000); self.bars_1m=deque(maxlen=2000)
+        self.mtf=MultiTimeframeFeatureEngine()
         self._last_candle_start=None
         self.orderbook=OrderBook(symbol,max_levels=50)
         self.rest=BybitRestClient()
@@ -54,6 +56,7 @@ class LiveSignalService:
                 if self._last_candle_start==event.event_time: return
                 self._last_candle_start=event.event_time
                 self.closes.append(float(p["close"])); self.highs.append(float(p["high"])); self.lows.append(float(p["low"]))
+                self.bars_1m.append(OHLCVBar(event.event_time,float(p["open"]),float(p["high"]),float(p["low"]),float(p["close"]),float(p["volume"])))
             elif topic.startswith("tickers."):
                 event=BybitNormalizer.ticker(message)
             elif topic.startswith("orderbook."):
@@ -77,7 +80,8 @@ class LiveSignalService:
                     self.symbol,event.event_time,list(self.closes),
                     highs=list(self.highs),lows=list(self.lows),orderbook=self.orderbook.state
                 )
-                state=self.builder.build(self.symbol,event.event_time,now,event.point_in_time_available_at,snap,{})
+                mtf_snapshot=self.mtf.build(self.symbol,list(self.bars_1m),event.event_time,as_of=now)
+                state=self.builder.build_multi(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap)
                 def save_state():
                     with SessionLocal() as session:
                         self.states.save(session,state); session.commit()
