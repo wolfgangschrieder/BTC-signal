@@ -85,10 +85,14 @@ class MultiTimeframeFeatureEngine:
     def __init__(self, feature_engine: FeatureEngine|None=None):
         self.feature_engine=feature_engine or FeatureEngine()
 
-    def build(self,symbol:str,bars_1m:list[OHLCVBar],timestamp:datetime)->MultiTimeframeSnapshot:
+    def build(self,symbol:str,bars_1m:list[OHLCVBar],timestamp:datetime,as_of:datetime|None=None)->MultiTimeframeSnapshot:
+        """Build only from bars whose complete availability time is <= as_of."""
+        cutoff=as_of or timestamp
+        ordered=sorted(bars_1m,key=lambda x:x.timestamp)
+        available=[bar for bar in ordered if bar.timestamp.astimezone(timezone.utc)+timedelta(minutes=1) <= cutoff.astimezone(timezone.utc)]
         snapshots={}
         for timeframe in Timeframe:
-            bars=aggregate_bars(bars_1m,timeframe)
+            bars=aggregate_bars(available,timeframe)
             if not bars:
                 snapshots[timeframe]=self.feature_engine.build(symbol,timestamp,[],[],[],[])
                 continue
