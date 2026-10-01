@@ -293,11 +293,10 @@ class LiveSignalService:
         finally:
             watchdog.cancel()
             await asyncio.gather(watchdog,return_exceptions=True)
-            for queue in (self._state_write_queue, self._outcome_write_queue):
-                try:
-                    queue.put_nowait(self._writer_stop)
-                except asyncio.QueueFull:
-                    pass
+            await self._state_write_queue.join()
+            await self._outcome_write_queue.join()
+            await self._state_write_queue.put(self._writer_stop)
+            await self._outcome_write_queue.put(self._writer_stop)
             await asyncio.gather(state_writer,outcome_writer,return_exceptions=True)
 
     async def stop(self):
