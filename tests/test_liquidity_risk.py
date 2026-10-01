@@ -11,3 +11,14 @@ def test_persistent_cluster_drives_dynamic_stop():
     levels=RiskEngine().build_levels("long",100,2,(),(cluster,))
     assert levels.stop_source=="liquidity"
     assert levels.stop_loss < 98
+
+def test_nonpersistent_short_cluster_falls_back_to_atr():
+    cluster=LiquidityCluster("ask",101.9,102.1,102.0,500.0,4,0.99,200.0,False)
+    levels=RiskEngine().build_levels("short",100,2,(),(cluster,))
+    assert levels.stop_source=="atr"
+
+def test_persistent_short_cluster_drives_dynamic_stop():
+    cluster=LiquidityCluster("ask",101.9,102.1,102.0,500.0,4,0.99,200.0,True,1000,3000,2000)
+    levels=RiskEngine().build_levels("short",100,2,(),(cluster,))
+    assert levels.stop_source=="liquidity"
+    assert levels.stop_loss > 102
