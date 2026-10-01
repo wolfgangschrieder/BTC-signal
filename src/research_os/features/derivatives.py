@@ -1,6 +1,31 @@
 from __future__ import annotations
 from dataclasses import dataclass
+from enum import Enum
 from datetime import datetime
+
+class DerivativesRegime(str, Enum):
+    UNKNOWN="unknown"
+    NEUTRAL="neutral"
+    POSITIVE_FUNDING="positive_funding"
+    NEGATIVE_FUNDING="negative_funding"
+    OI_RISING="oi_rising"
+    OI_FALLING="oi_falling"
+    LIQUIDATION_STRESS="liquidation_stress"
+
+
+@dataclass(frozen=True)
+class DerivativesState:
+    funding_regime: str
+    oi_regime: str
+    positioning: str
+    liquidation_stress: str
+    price_oi_relationship: str
+    funding_price_relationship: str
+    alignment: str
+    strength: float
+    available: bool
+    version: str = "derivatives-state-v1"
+
 
 @dataclass(frozen=True)
 class DerivativesSnapshot:
@@ -15,6 +40,7 @@ class DerivativesSnapshot:
     liquidation_imbalance: float | None
     available: bool
     reason: str | None = None
+    state: DerivativesState | None = None
     version: str = "derivatives-v1"
 
 class DerivativesEngine:
@@ -45,7 +71,27 @@ class DerivativesEngine:
         total=liquidation_long+liquidation_short
         liq_imb=(liquidation_long-liquidation_short)/total if total else None
         available=any(x is not None for x in (funding_rate,open_interest,liq_imb))
-        return DerivativesSnapshot(timestamp,funding_rate,open_interest,oi_change,price_oi_div,funding_div,liquidation_long,liquidation_short,liq_imb,available,None if available else "no derivatives data")
+        state=classify_derivatives_state(funding_rate, oi_change, price_oi_div, funding_div, liquidation_long, liquidation_short, liq_imb, available)
+        return DerivativesSnapshot(timestamp,funding_rate,open_interest,oi_change,price_oi_div,funding_div,liquidation_long,liquidation_short,liq_imb,available,None if available else "no derivatives data",state)
+
+def classify_derivatives_state(funding_rate, oi_change, price_oi_divergence,
+                              funding_price_divergence, liquidation_long,
+                              liquidation_short, liquidation_imbalance, available):
+    if not available:
+        return DerivativesState("unknown","unknown","unknown","unknown","unknown","unknown","unknown",0.0,False)
+    funding_regime = "positive_funding" if funding_rate is not None and funding_rate > 0 else "negative_funding" if funding_rate is not None and funding_rate < 0 else "neutral"
+    oi_regime = "rising" if oi_change is not None and oi_change > 0 else "falling" if oi_change is not None and oi_change < 0 else "neutral"
+    total_liq=(liquidation_long or 0.0)+(liquidation_short or 0.0)
+    stress="high" if total_liq > 0 else "none"
+    price_oi = "bearish_divergence" if price_oi_divergence == -1 else "bullish_divergence" if price_oi_divergence == 1 else "aligned_or_neutral"
+    funding_price = "bullish_divergence" if funding_price_divergence == 1 else "bearish_divergence" if funding_price_divergence == -1 else "aligned_or_neutral"
+    signals=sum(x != "aligned_or_neutral" for x in (price_oi,funding_price))
+    conflicting=(price_oi == "bullish_divergence" and funding_price == "bearish_divergence") or (price_oi == "bearish_divergence" and funding_price == "bullish_divergence")
+    alignment="conflicting" if conflicting else "neutral"
+    strength=min(1.0, 0.25*signals + (0.25 if abs(liquidation_imbalance or 0) >= 0.5 else 0.0))
+    positioning="crowded_long" if funding_rate is not None and funding_rate > 0 and oi_change is not None and oi_change > 0 else "crowded_short" if funding_rate is not None and funding_rate < 0 and oi_change is not None and oi_change > 0 else "mixed"
+    return DerivativesState(funding_regime,oi_regime,positioning,stress,price_oi,funding_price,alignment,strength,True)
+
 
 def snapshot_features(snapshot):
     return {
