@@ -20,6 +20,11 @@ class CrossMarketFeatureEngine:
         synchronized=bool(event_times) and skew_seconds <= max_skew_seconds
         if not synchronized:
             availability={asset:False for asset in latest}
+        event_times=[obs.timestamp for obs in latest.values()]
+        skew_seconds=max((max(event_times)-min(event_times)).total_seconds(),0.0) if event_times else 0.0
+        synchronized=bool(event_times) and skew_seconds <= max_skew_seconds
+        if not synchronized:
+            availability={asset:False for asset in latest}
         for asset,obs in latest.items():
             values[asset]=obs.value
             availability[asset]=True
