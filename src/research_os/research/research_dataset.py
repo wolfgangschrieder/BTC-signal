@@ -5,7 +5,11 @@ from datetime import datetime, timedelta
 from math import isfinite
 from typing import Mapping, Sequence
 
+from research_os.cross_market.models import CrossMarketObservation
+from research_os.cross_market.research import CrossMarketResearchEngine
+from research_os.features.engine import FeatureEngine
 from research_os.intelligence.events import ExternalEvent, ExternalEventEngine
+from research_os.market.state_builder import MarketStateBuilder
 from research_os.research.replay import ReplayCandle
 
 
@@ -20,6 +24,7 @@ class ResearchDatasetRow:
     mfe_pct: float
     mae_pct: float
     features: tuple[tuple[str, float], ...]
+    cross_market: tuple[tuple[str, float | None, float | None, float | None, int, bool], ...]
     external_event_count: int
     external_high_impact_count: int
     external_weighted_sentiment: float | None
@@ -44,9 +49,12 @@ class DatasetPITViolation:
 
 
 class ResearchDatasetBuilder:
-    version = "research-dataset-v1"
+    version = "research-dataset-v2"
 
-    def __init__(self, external_engine: ExternalEventEngine | None = None) -> None:
+    def __init__(self, feature_engine=None, state_builder=None, cross_market_engine=None, external_engine=None):
+        self.features = feature_engine or FeatureEngine()
+        self.state_builder = state_builder or MarketStateBuilder()
+        self.cross_market = cross_market_engine or CrossMarketResearchEngine()
         self.external_engine = external_engine or ExternalEventEngine()
 
     def build(
@@ -55,11 +63,14 @@ class ResearchDatasetBuilder:
         decision_times: Sequence[datetime],
         candles: Sequence[ReplayCandle],
         *,
+        cross_market_observations: Sequence[CrossMarketObservation] = (),
         features_by_time: Mapping[datetime, Mapping[str, float | None]] | None = None,
         external_events: Sequence[ExternalEvent] = (),
         horizon_minutes: int = 60,
         external_lookback_seconds: float = 3600.0,
         min_event_relevance: float = 0.0,
+        cross_market_min_samples: int = 20,
+        cross_market_window_size: int = 252,
     ) -> ResearchDataset:
         if horizon_minutes <= 0:
             raise ValueError("horizon_minutes must be positive")
@@ -67,142 +78,131 @@ class ResearchDatasetBuilder:
             raise ValueError("external_lookback_seconds must be non-negative")
         if not 0.0 <= min_event_relevance <= 1.0:
             raise ValueError("min_event_relevance must be between 0 and 1")
+        if cross_market_min_samples < 1 or cross_market_window_size < cross_market_min_samples:
+            raise ValueError("invalid cross-market normalization parameters")
 
-        ordered_candles = tuple(sorted(candles, key=lambda c: c.event_time))
-        ordered_decisions = tuple(sorted(set(decision_times)))
-        rows: list[ResearchDatasetRow] = []
+        ordered = tuple(sorted(candles, key=lambda c: c.event_time))
+        events = tuple(external_events)
+        observations = tuple(cross_market_observations)
+        rows = []
         skipped = 0
 
-        for decision_time in ordered_decisions:
-            candle = self._decision_candle(ordered_candles, decision_time)
-            if candle is None:
+        for decision_time in sorted(set(decision_times)):
+            available = tuple(
+                c for c in ordered
+                if c.event_time <= decision_time
+                and (c.point_in_time_available_at or c.event_time) <= decision_time
+            )
+            if not available or available[-1].event_time != decision_time:
                 skipped += 1
                 continue
 
-            pit = candle.point_in_time_available_at or candle.event_time
-            if pit > decision_time:
-                skipped += 1
-                continue
-
-            future = self._future_window(
-                ordered_candles,
-                decision_time,
-                decision_time + timedelta(minutes=horizon_minutes),
+            future = tuple(
+                c for c in ordered
+                if decision_time < c.event_time <= decision_time + timedelta(minutes=horizon_minutes)
             )
             if not future or future[-1].event_time < decision_time + timedelta(minutes=horizon_minutes):
                 skipped += 1
                 continue
 
-            snapshot = self.external_engine.build(
-                decision_time,
-                list(external_events),
-                as_of=decision_time,
-                lookback_seconds=external_lookback_seconds,
-                min_relevance=min_event_relevance,
-            )
+            closes = tuple(float(c.close) for c in available)
+            volumes = tuple(float(c.volume) for c in available)
+            highs = tuple(float(c.high) for c in available)
+            lows = tuple(float(c.low) for c in available)
+            snapshot = self.features.build(symbol, decision_time, closes, volumes, highs, lows)
+            state = self.state_builder.build(symbol, decision_time, decision_time, decision_time, snapshot, {})
 
-            feature_items: list[tuple[str, float]] = []
+            feature_items = []
+            for feature in snapshot.features:
+                if feature.available and feature.value is not None:
+                    value = float(feature.value)
+                    if not isfinite(value):
+                        raise ValueError(f"feature {feature.name!r} must be finite")
+                    feature_items.append((feature.name, value))
+
             for name, value in sorted((features_by_time or {}).get(decision_time, {}).items()):
                 if value is None:
                     continue
-                numeric = float(value)
-                if not isfinite(numeric):
+                value = float(value)
+                if not isfinite(value):
                     raise ValueError(f"feature {name!r} must be finite")
-                feature_items.append((name, numeric))
+                feature_items.append((name, value))
 
-            entry = float(candle.close)
-            final = future[-1]
-            rows.append(
-                ResearchDatasetRow(
-                    symbol=symbol,
-                    decision_time=decision_time,
-                    entry_price=entry,
-                    horizon_minutes=horizon_minutes,
-                    outcome_time=final.event_time,
-                    return_pct=(float(final.close) - entry) / entry,
-                    mfe_pct=(max(float(c.high) for c in future) - entry) / entry,
-                    mae_pct=(min(float(c.low) for c in future) - entry) / entry,
-                    features=tuple(feature_items),
-                    external_event_count=snapshot.total_count,
-                    external_high_impact_count=snapshot.high_impact_count,
-                    external_weighted_sentiment=snapshot.weighted_sentiment,
-                    external_max_relevance=snapshot.max_relevance,
-                    external_categories=snapshot.categories,
-                    external_event_ids=tuple(event.event_id for event in snapshot.events),
-                )
+            for name, value in sorted(state.values.items()):
+                if value is None:
+                    continue
+                value = float(value)
+                if not isfinite(value):
+                    raise ValueError(f"state value {name!r} must be finite")
+                feature_items.append((f"state:{name}", value))
+
+            cross = self.cross_market.build(
+                decision_time, observations, as_of=decision_time,
+                min_samples=cross_market_min_samples, window_size=cross_market_window_size
+            )
+            cross_rows = tuple(
+                (asset, norm.value, norm.zscore, norm.percentile, norm.sample_size, norm.available)
+                for asset, norm in sorted(cross.normalized.items())
             )
 
-        rows.sort(key=lambda row: (row.decision_time, row.outcome_time))
+            external = self.external_engine.build(
+                decision_time, list(events), as_of=decision_time,
+                lookback_seconds=external_lookback_seconds, min_relevance=min_event_relevance
+            )
+
+            entry = float(available[-1].close)
+            final = future[-1]
+            rows.append(ResearchDatasetRow(
+                symbol, decision_time, entry, horizon_minutes, final.event_time,
+                (float(final.close) - entry) / entry,
+                (max(float(c.high) for c in future) - entry) / entry,
+                (min(float(c.low) for c in future) - entry) / entry,
+                tuple(feature_items), cross_rows,
+                external.total_count, external.high_impact_count,
+                external.weighted_sentiment, external.max_relevance,
+                external.categories, tuple(e.event_id for e in external.events),
+            ))
+
+        rows.sort(key=lambda r: (r.decision_time, r.outcome_time))
         return ResearchDataset(
-            symbol=symbol,
-            version=f"{self.version}:{horizon_minutes}:{int(external_lookback_seconds)}:{min_event_relevance:g}",
-            rows=tuple(rows),
-            skipped=skipped,
+            symbol, f"{self.version}:{horizon_minutes}:{int(external_lookback_seconds)}:{min_event_relevance:g}",
+            tuple(rows), skipped
         )
 
     @staticmethod
-    def _decision_candle(candles: Sequence[ReplayCandle], timestamp: datetime) -> ReplayCandle | None:
-        candidates = [
-            candle for candle in candles
-            if candle.event_time == timestamp
-            and (candle.point_in_time_available_at or candle.event_time) <= timestamp
-        ]
-        return candidates[-1] if candidates else None
-
-    @staticmethod
-    def _future_window(candles: Sequence[ReplayCandle], start: datetime, end: datetime) -> list[ReplayCandle]:
-        return [candle for candle in candles if start < candle.event_time <= end]
-
-    @staticmethod
-    def audit_pit(
-        dataset: ResearchDataset,
-        external_events: Sequence[ExternalEvent] = (),
-    ) -> tuple[DatasetPITViolation, ...]:
-        source_by_id = {(event.source, event.event_id): event for event in external_events}
-        violations: list[DatasetPITViolation] = []
-
+    def audit_pit(dataset, external_events=(), cross_market_observations=()):
+        violations = []
         for row in dataset.rows:
             if row.outcome_time <= row.decision_time:
                 violations.append(DatasetPITViolation(row.decision_time, "outcome_time", row.outcome_time))
-
-            for event_id in row.external_event_ids:
-                matches = [event for (source, eid), event in source_by_id.items() if eid == event_id]
-                for event in matches:
-                    if event.point_in_time_available_at > row.decision_time:
-                        violations.append(
-                            DatasetPITViolation(
-                                row.decision_time,
-                                f"external_event:{event_id}",
-                                event.point_in_time_available_at,
-                            )
-                        )
+            for event in external_events:
+                if event.event_id in row.external_event_ids and event.point_in_time_available_at > row.decision_time:
+                    violations.append(DatasetPITViolation(row.decision_time, f"external_event:{event.event_id}", event.point_in_time_available_at))
+            for asset, _, _, _, _, _ in row.cross_market:
+                for obs in cross_market_observations:
+                    if obs.asset == asset and obs.timestamp <= row.decision_time and obs.point_in_time_available_at > row.decision_time:
+                        violations.append(DatasetPITViolation(row.decision_time, f"cross_market:{asset}", obs.point_in_time_available_at))
         return tuple(violations)
 
     @staticmethod
-    def chronological_split(
-        dataset: ResearchDataset,
-        train_ratio: float = 0.7,
-        purge_minutes: int | None = None,
-    ) -> tuple[ResearchDataset, ResearchDataset]:
+    def chronological_split(dataset, train_ratio=0.7, purge_minutes=None):
         if not 0.0 < train_ratio < 1.0:
             raise ValueError("train_ratio must be between 0 and 1")
-        rows = tuple(sorted(dataset.rows, key=lambda row: row.decision_time))
+        rows = tuple(sorted(dataset.rows, key=lambda r: r.decision_time))
         if not rows:
-            empty = ResearchDataset(dataset.symbol, dataset.version + ":train", (), 0)
-            return empty, ResearchDataset(dataset.symbol, dataset.version + ":test", (), 0)
-
+            return (
+                ResearchDataset(dataset.symbol, dataset.version + ":train", (), 0),
+                ResearchDataset(dataset.symbol, dataset.version + ":test", (), 0),
+            )
         cut = int(len(rows) * train_ratio)
         if cut <= 0 or cut >= len(rows):
             raise ValueError("train_ratio produces an empty split")
-
-        purge = dataset.rows[0].horizon_minutes if purge_minutes is None else purge_minutes
+        purge = rows[0].horizon_minutes if purge_minutes is None else purge_minutes
         if purge < 0:
             raise ValueError("purge_minutes must be non-negative")
-
         train = rows[:cut]
         boundary = train[-1].decision_time + timedelta(minutes=purge)
-        test = tuple(row for row in rows[cut:] if row.decision_time > boundary)
-
+        test = tuple(r for r in rows[cut:] if r.decision_time > boundary)
         return (
             ResearchDataset(dataset.symbol, dataset.version + ":train", train, 0),
             ResearchDataset(dataset.symbol, dataset.version + ":test", test, len(rows[cut:]) - len(test)),
