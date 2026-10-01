@@ -16,14 +16,16 @@ class DerivativesOutcome:
     oi_change_after: float | None
     regime_after: str | None
 
-def compute_outcome(state: DerivativesState, state_timestamp: datetime, candles, horizon_minutes: int, oi_before: float | None = None, oi_after: float | None = None) -> DerivativesOutcome | None:
+def compute_outcome(state: DerivativesState, state_timestamp: datetime, candles, horizon_minutes: int, entry_price: float | None = None, oi_before: float | None = None, oi_after: float | None = None) -> DerivativesOutcome | None:
     if not candles:
         return None
     target=state_timestamp + timedelta(minutes=horizon_minutes)
-    window=[c for c in candles if state_timestamp <= c.timestamp <= target]
+    window=[c for c in candles if state_timestamp < c.timestamp <= target]
     if not window or window[-1].timestamp < target:
         return None
-    entry=float(window[0].close)
+    if entry_price is None:
+        return None
+    entry=float(entry_price)
     if entry <= 0:
         return None
     final=window[-1]
