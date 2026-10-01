@@ -20,7 +20,7 @@ def compute_outcome(state: DerivativesState, state_timestamp: datetime, candles,
         return None
     target=state_timestamp + timedelta(minutes=horizon_minutes)
     window=[c for c in candles if state_timestamp <= c.timestamp <= target]
-    if not window:
+    if not window or window[-1].timestamp < target:
         return None
     entry=float(window[0].close)
     if entry <= 0:
