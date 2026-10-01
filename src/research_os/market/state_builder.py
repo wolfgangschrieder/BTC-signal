@@ -8,8 +8,9 @@ class MarketStateBuilder:
     def build(self, symbol: str, timestamp: datetime, decision_time: datetime, pit: datetime, snapshot: FeatureSnapshot, data_quality: dict[str,str] | None = None, extra_values: dict[str, float | None] | None = None, extra_availability: dict[str, bool] | None = None) -> MarketStateVector:
         values={f.name:f.value for f in snapshot.features}
         availability={f.name:f.available for f in snapshot.features}
-        if snapshot.state is not None:
-            state=snapshot.state
+        mtf_state=getattr(snapshot, "state", None)
+        if mtf_state is not None:
+            state=mtf_state
             values.update({
                 "mtf_trend": state.trend,
                 "mtf_momentum": state.momentum,
@@ -23,14 +24,6 @@ class MarketStateBuilder:
             })
             for key in ("mtf_trend","mtf_momentum","mtf_volatility","mtf_structure","mtf_breakout","mtf_pullback","mtf_alignment","mtf_conflict","mtf_strength"):
                 availability[key]=True
-        if extra_values:
-            values.update(extra_values)
-        if extra_availability:
-            availability.update(extra_availability)
-        if extra_values:
-            values.update(extra_values)
-        if extra_availability:
-            availability.update(extra_availability)
         if extra_values:
             values.update(extra_values)
         if extra_availability:
