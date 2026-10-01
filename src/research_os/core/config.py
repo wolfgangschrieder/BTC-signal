@@ -9,5 +9,7 @@ class Settings(BaseSettings):
     telegram_bot_token:str=""; telegram_chat_id:str=""
     signal_min_probability:float=Field(default=.70,ge=0,le=1); signal_min_ev:float=0.0
     report_timezone:str="Europe/Moscow"; report_hour:int=20; report_minute:int=0
+    fred_api_key:str=""
+    cross_market_enabled:bool=False
 @lru_cache
 def get_settings()->Settings: return Settings()
