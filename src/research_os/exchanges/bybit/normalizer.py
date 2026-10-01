@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Any
 from research_os.data.models import EventType, RawEvent
 from research_os.exchanges.bybit.schemas import BybitTicker, BybitTrade
@@ -29,7 +28,7 @@ class BybitNormalizer:
         ingested = ingestion_time or datetime.now(timezone.utc)
         return RawEvent(
             source="bybit",
-            event_type=EventType.CANDLE,
+            event_type=EventType.TICKER,
             symbol=model.symbol,
             event_time=datetime.fromtimestamp(model.timestamp_ms / 1000, tz=timezone.utc),
             ingestion_time=ingested,
