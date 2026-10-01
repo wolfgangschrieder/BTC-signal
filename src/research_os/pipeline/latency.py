@@ -4,26 +4,41 @@ from collections import defaultdict
 from time import perf_counter
 from typing import Iterator
 from contextlib import contextmanager
+from math import ceil
 
 @dataclass
 class LatencyHistogram:
     samples_ms: list[float] = field(default_factory=list)
     max_samples: int = 10_000
+
     def observe(self, value_ms: float) -> None:
         if value_ms < 0:
             return
         self.samples_ms.append(value_ms)
         if len(self.samples_ms) > self.max_samples:
-            del self.samples_ms[:len(self.samples_ms)-self.max_samples]
+            del self.samples_ms[:len(self.samples_ms) - self.max_samples]
+
     def percentile(self, q: float) -> float | None:
         if not self.samples_ms:
             return None
         if not 0 <= q <= 1:
             raise ValueError("q must be between 0 and 1")
-        xs=sorted(self.samples_ms)
-        index=min(len(xs)-1, int(round(q*(len(xs)-1))))
+        xs = sorted(self.samples_ms)
+        if q == 0:
+            return xs[0]
+        index = min(len(xs) - 1, ceil(q * len(xs)) - 1)
         return xs[index]
-    def summary(self) -> dict[str,float|int|None]:
+
+    def summary(self) -> dict[str, float | int | None]:
+        if not self.samples_ms:
+            return {
+                "count": 0,
+                "min_ms": None,
+                "p50_ms": None,
+                "p95_ms": None,
+                "p99_ms": None,
+                "max_ms": None,
+            }
         return {
             "count": len(self.samples_ms),
             "min_ms": min(self.samples_ms),
@@ -35,15 +50,18 @@ class LatencyHistogram:
 
 @dataclass
 class LatencyTelemetry:
-    stages: dict[str,LatencyHistogram] = field(default_factory=lambda: defaultdict(LatencyHistogram))
+    stages: dict[str, LatencyHistogram] = field(default_factory=lambda: defaultdict(LatencyHistogram))
+
     def observe(self, stage: str, elapsed_ms: float) -> None:
         self.stages[stage].observe(elapsed_ms)
+
     @contextmanager
     def timer(self, stage: str) -> Iterator[None]:
-        start=perf_counter()
+        start = perf_counter()
         try:
             yield
         finally:
-            self.observe(stage,(perf_counter()-start)*1000.0)
-    def report(self) -> dict[str,dict[str,float|int|None]]:
-        return {name:hist.summary() for name,hist in self.stages.items()}
+            self.observe(stage, (perf_counter() - start) * 1000.0)
+
+    def report(self) -> dict[str, dict[str, float | int | None]]:
+        return {name: hist.summary() for name, hist in self.stages.items()}
