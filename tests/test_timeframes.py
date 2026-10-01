@@ -67,7 +67,11 @@ def test_mtf_excludes_bars_after_state_timestamp():
     from datetime import datetime, timedelta, timezone
     from research_os.features.timeframes import OHLCVBar, MultiTimeframeFeatureEngine
     t=datetime(2026,1,1,tzinfo=timezone.utc)
-    bars=[OHLCVBar(t+i*timedelta(minutes=1),100,101,99,100+i,10) for i in range(10)]
-    s=MultiTimeframeFeatureEngine().build("BTCUSDT",bars,t+timedelta(minutes=5),as_of=t+timedelta(minutes=10))
-    assert all(x.timestamp <= t+timedelta(minutes=5) for x in bars[:6])
-    assert s.snapshots
+    decision=t+timedelta(minutes=5)
+    base=[OHLCVBar(t+i*timedelta(minutes=1),100,101,99,100+i,10) for i in range(10)]
+    future_changed=list(base)
+    future_changed[-1]=OHLCVBar(t+timedelta(minutes=9),100,999,1,999,10)
+    engine=MultiTimeframeFeatureEngine()
+    a=engine.build("BTCUSDT",base,decision,as_of=t+timedelta(minutes=10))
+    b=engine.build("BTCUSDT",future_changed,decision,as_of=t+timedelta(minutes=10))
+    assert a==b
