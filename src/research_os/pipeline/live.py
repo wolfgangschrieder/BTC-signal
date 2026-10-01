@@ -174,10 +174,26 @@ class LiveSignalService:
                 return feature.value
         return None
 
+    async def bootstrap_derivatives_history(self):
+        if not self.publisher:
+            return
+        try:
+            funding=await self.rest.get_funding_history(symbol=self.symbol,limit=200)
+            await self.publisher_many(BybitNormalizer.funding_history(funding))
+            oi=await self.rest.get_open_interest(symbol=self.symbol,interval_time="5min",limit=200)
+            await self.publisher_many(BybitNormalizer.open_interest_history(oi,self.symbol))
+        except (KeyError,TypeError,ValueError,RuntimeError):
+            return
+
+    async def publisher_many(self, events):
+        for event in events:
+            await self.publisher(event)
+
     async def bootstrap_orderbook(self):
         await self._recover_orderbook()
 
     async def run(self):
+        await self.bootstrap_derivatives_history()
         await self.bootstrap_orderbook()
         watchdog=asyncio.create_task(self._orderbook_watchdog())
         try:
