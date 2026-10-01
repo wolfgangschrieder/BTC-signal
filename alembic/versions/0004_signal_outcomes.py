@@ -1,10 +1,10 @@
 """signal outcomes and reporting
-Revision ID: 0004_signal_outcomes
+Revision ID: 0004_signal_outcomes_branch
 Revises: 0003_timeseries
 """
 from alembic import op
 import sqlalchemy as sa
-revision="0004_signal_outcomes"; down_revision="0003_timeseries"; branch_labels=None; depends_on=None
+revision="0004_signal_outcomes_branch"; down_revision="0003_timeseries"; branch_labels=None; depends_on=None
 def upgrade():
     op.create_table("signal_outcomes",
         sa.Column("id",sa.BigInteger(),primary_key=True,autoincrement=True),
