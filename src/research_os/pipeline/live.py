@@ -112,7 +112,21 @@ class LiveSignalService:
                 short_liq=sum(size for ts,side,size in self.liquidations if ts.timestamp() >= cutoff and side.lower()=="sell")
                 deriv=self.derivatives.build(event.event_time,float(event.payload["close"]),self.derivatives_funding,self.derivatives_oi,self.previous_derivatives_price,self.previous_funding,self.previous_oi,long_liq,short_liq)
                 deriv_values=derivatives_features(deriv)
-                extra={**flow_values,**deriv_values}
+                if deriv.state is not None:
+                    extra_state=deriv.state
+                    extra={
+                        **flow_values,
+                        **deriv_values,
+                        "derivatives_state_strength": extra_state.strength,
+                        "derivatives_state_conflict": 1.0 if extra_state.alignment == "conflicting" else 0.0,
+                        "derivatives_funding_positive": 1.0 if extra_state.funding_regime == "positive_funding" else 0.0,
+                        "derivatives_funding_negative": 1.0 if extra_state.funding_regime == "negative_funding" else 0.0,
+                        "derivatives_oi_rising": 1.0 if extra_state.oi_regime == "rising" else 0.0,
+                        "derivatives_oi_falling": 1.0 if extra_state.oi_regime == "falling" else 0.0,
+                        "derivatives_liquidation_stress": 1.0 if extra_state.liquidation_stress == "high" else 0.0,
+                    }
+                else:
+                    extra={**flow_values,**deriv_values}
                 extra["orderflow_cumulative_delta"]=self.cumulative_delta
                 availability={key: ((flow.available and value is not None) if key.startswith("orderflow_") else (deriv.available and value is not None)) for key,value in extra.items()}
                 state=self.builder.build_multi(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap,extra_values=extra,extra_availability=availability)
