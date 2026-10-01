@@ -64,6 +64,7 @@ class LiveSignalService:
                     return
                 self._last_orderbook_update=datetime.now(timezone.utc)
                 event=BybitNormalizer.orderbook(message)
+                event.payload["valid"]=self.orderbook.state.valid
                 if self.publisher: await self.publisher(event)
                 return
             else:
