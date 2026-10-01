@@ -23,6 +23,10 @@ class MarketStateBuilder:
             })
             for key in ("mtf_trend","mtf_momentum","mtf_volatility","mtf_structure","mtf_breakout","mtf_pullback","mtf_alignment","mtf_conflict","mtf_strength"):
                 availability[key]=True
+        if extra_values:
+            values.update(extra_values)
+        if extra_availability:
+            availability.update(extra_availability)
         quality=data_quality or {}
         return MarketStateVector.build(symbol,timestamp,decision_time,pit,values,availability,quality,snapshot.version)
 
