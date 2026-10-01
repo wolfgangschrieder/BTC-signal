@@ -25,6 +25,7 @@ from research_os.signals.outcome_repository import SignalOutcomeRepository
 from research_os.pipeline.realtime import RealtimeSignalPipeline
 from research_os.database.session import SessionLocal
 from research_os.market.state_repository import MarketStateRepository
+from research_os.pipeline.latency import LatencyTelemetry
 
 EventPublisher=Callable[[object],Awaitable[None]]
 
@@ -51,6 +52,9 @@ class LiveSignalService:
         self._recovery_lock=asyncio.Lock()
         self._state_write_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
         self._outcome_write_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
+        self._event_publish_queue: asyncio.Queue = asyncio.Queue(maxsize=10_000)
+        self._notification_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
+        self.latency = LatencyTelemetry()
         self._writer_stop = object()
         self.features=FeatureEngine(); self.builder=MarketStateBuilder()
         guard_instance = guard or SignalGuard(
@@ -76,14 +80,14 @@ class LiveSignalService:
                     self.cumulative_delta=flow.cumulative_delta or self.cumulative_delta
                     self.previous_flow_price=float(p["price"])
                     self.previous_flow_cvd=self.cumulative_delta
-                if self.publisher: await self.publisher(event)
+                self._enqueue_event(event)
                 return
             if topic.startswith("allLiquidation."):
                 events=BybitNormalizer.liquidations(message)
                 for event in events:
                     p=event.payload
                     self.liquidations.append((event.event_time,str(p["side"]),float(p["size"])))
-                    if self.publisher: await self.publisher(event)
+                    self._enqueue_event(event)
                 return
             if topic.startswith("kline."):
                 event=BybitNormalizer.kline(message); p=event.payload
@@ -114,12 +118,12 @@ class LiveSignalService:
                     self._liquidity_state=None
                 event=BybitNormalizer.orderbook(message)
                 event.payload["valid"]=self.orderbook.state.valid
-                if self.publisher: await self.publisher(event)
+                self._enqueue_event(event)
                 return
             else:
                 return
 
-            if self.publisher: await self.publisher(event)
+            self._enqueue_event(event)
             if topic.startswith("kline.") and len(self.closes)>=6:
                 now=datetime.now(timezone.utc)
                 closes=list(self.closes); highs=list(self.highs); lows=list(self.lows); bars=list(self.bars_1m); trades=list(self.trades); book_state=self.orderbook.state
@@ -185,9 +189,58 @@ class LiveSignalService:
                         self._outcome_write_queue.put_nowait(signal)
                     except asyncio.QueueFull:
                         pass
-                if msg and self.telegram: await self.telegram.send(msg.text)
+                if msg and self.telegram:
+                    self._enqueue_notification(msg.text)
         except (KeyError,ValueError,TypeError):
             return
+
+    def _enqueue_event(self, event) -> None:
+        if self.publisher is None:
+            return
+        try:
+            self._event_publish_queue.put_nowait(event)
+        except asyncio.QueueFull:
+            try:
+                self._event_publish_queue.get_nowait()
+                self._event_publish_queue.task_done()
+                self._event_publish_queue.put_nowait(event)
+            except asyncio.QueueEmpty:
+                pass
+
+    def _enqueue_notification(self, text: str) -> None:
+        try:
+            self._notification_queue.put_nowait(text)
+        except asyncio.QueueFull:
+            try:
+                self._notification_queue.get_nowait()
+                self._notification_queue.task_done()
+                self._notification_queue.put_nowait(text)
+            except asyncio.QueueEmpty:
+                pass
+
+    async def _cold_event_publisher(self) -> None:
+        while True:
+            event = await self._event_publish_queue.get()
+            if event is self._writer_stop:
+                self._event_publish_queue.task_done()
+                return
+            try:
+                if self.publisher:
+                    await self.publisher(event)
+            finally:
+                self._event_publish_queue.task_done()
+
+    async def _cold_notification_writer(self) -> None:
+        while True:
+            text = await self._notification_queue.get()
+            if text is self._writer_stop:
+                self._notification_queue.task_done()
+                return
+            try:
+                if self.telegram:
+                    await self.telegram.send(text)
+            finally:
+                self._notification_queue.task_done()
 
     async def _recover_orderbook(self):
         async with self._recovery_lock:
@@ -283,6 +336,8 @@ class LiveSignalService:
         await self._recover_orderbook()
 
     async def run(self):
+        event_writer=asyncio.create_task(self._cold_event_publisher())
+        notification_writer=asyncio.create_task(self._cold_notification_writer())
         await self.bootstrap_derivatives_history()
         await self.bootstrap_orderbook()
         watchdog=asyncio.create_task(self._orderbook_watchdog())
@@ -295,9 +350,13 @@ class LiveSignalService:
             await asyncio.gather(watchdog,return_exceptions=True)
             await self._state_write_queue.join()
             await self._outcome_write_queue.join()
+            await self._event_publish_queue.join()
+            await self._notification_queue.join()
             await self._state_write_queue.put(self._writer_stop)
             await self._outcome_write_queue.put(self._writer_stop)
-            await asyncio.gather(state_writer,outcome_writer,return_exceptions=True)
+            await self._event_publish_queue.put(self._writer_stop)
+            await self._notification_queue.put(self._writer_stop)
+            await asyncio.gather(state_writer,outcome_writer,event_writer,notification_writer,return_exceptions=True)
 
     async def stop(self):
         await self.websocket.stop()
