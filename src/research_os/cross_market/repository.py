@@ -18,6 +18,9 @@ class CrossMarketRepository:
             FROM intelligence.cross_market_observations
             WHERE asset=:asset AND event_time<=:decision_time
               AND point_in_time_available_at<=:decision_time
-            ORDER BY event_time DESC LIMIT 1
+            ORDER BY event_time DESC,
+                     point_in_time_available_at DESC,
+                     source ASC
+            LIMIT 1
         """),{"asset":asset,"decision_time":decision_time}).mappings().first()
         return dict(row) if row else None
