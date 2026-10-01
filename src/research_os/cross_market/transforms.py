@@ -21,7 +21,7 @@ def transform(current,previous,asset):
     if previous is None:
         return None
     if asset=="US10Y":
-        return (float(current)-float(previous))*100.0
+        return round((float(current)-float(previous))*100.0, 12)
     if asset=="VIX":
         return float(current)-float(previous)
     if previous==0:
