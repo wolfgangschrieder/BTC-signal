@@ -22,7 +22,7 @@ class MarketStateVector:
     @property
     def values(self):
         """Backward-compatible numeric view; canonical state lives in numeric/categorical."""
-        return self.numeric
+        return {**self.numeric, **self.categorical}
 
     @classmethod
     def build(
