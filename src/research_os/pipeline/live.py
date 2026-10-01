@@ -61,8 +61,13 @@ class LiveSignalService:
             max_latency_ms=float(getattr(config, "signal_guard_max_latency_ms", 500.0)) if config is not None else 500.0,
             max_spread_bps=float(getattr(config, "signal_guard_max_spread_bps", 10.0)) if config is not None else 10.0,
             max_orderbook_age_ms=int(getattr(config, "signal_guard_max_orderbook_age_ms", 5000)) if config is not None else 5000,
+            min_probability=float(getattr(config, "signal_min_probability", 0.70)) if config is not None else 0.70,
+            min_expected_value=float(getattr(config, "signal_min_ev", 0.0)) if config is not None else 0.0,
         )
-        self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(),TelegramFormatter(),guard_instance)
+        signal_engine = SignalEngine(
+            min_probability=float(getattr(config, "signal_min_probability", 0.70)) if config is not None else 0.70
+        )
+        self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),signal_engine,TelegramFormatter(),guard_instance)
         self.outcomes=SignalOutcomeRepository(); self.states=MarketStateRepository()
         self.websocket=BybitWebSocket(
             [f"kline.{interval}.{symbol}",f"tickers.{symbol}",f"orderbook.50.{symbol}",f"publicTrade.{symbol}",f"allLiquidation.{symbol}"],
