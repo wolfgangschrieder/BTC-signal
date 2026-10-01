@@ -26,8 +26,8 @@ def test_derivatives_outcome_is_deterministic():
     assert round(o.mae_pct,6)==-0.02
     assert round(o.oi_change_after,6)==0.1
 
-def test_derivatives_outcome_requires_future_window():
+def test_derivatives_outcome_requires_complete_window():
     t=datetime(2026,1,1,tzinfo=timezone.utc)
     state=DerivativesState("unknown","unknown","unknown","unknown","unknown","unknown","unknown",0,False)
     candles=[Candle(t,100,101,99,100)]
-    assert compute_outcome(state,t,candles,5) is not None
+    assert compute_outcome(state,t,candles,5) is None
