@@ -10,6 +10,7 @@ class SignalExecutionContext:
     spread_bps: float | None = None
     orderbook_valid: bool = True
     orderbook_age_ms: int | None = None
+    data_quality_ok: bool = True
 
 @dataclass
 class SignalGuard:
@@ -48,6 +49,8 @@ class SignalGuard:
         if min(signal.levels.rr_tp1, signal.levels.rr_tp2, signal.levels.rr_tp3) < self.min_rr:
             return False, ("risk/reward below guard threshold",)
         if context is not None:
+            if not context.data_quality_ok:
+                return False, ("data quality degraded",)
             if context.latency_ms is not None and context.latency_ms > self.max_latency_ms:
                 return False, ("socket latency above guard threshold",)
             if context.spread_bps is not None and context.spread_bps > self.max_spread_bps:
