@@ -53,7 +53,8 @@ class LiveSignalService:
         self._state_write_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
         self._outcome_write_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
         self._event_publish_queue: asyncio.Queue = asyncio.Queue(maxsize=10_000)
-        self._notification_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
+        self._notification_queue: asyncio.Queue = asyncio.Queue()
+        self._event_persistence_healthy = True
         self.latency = LatencyTelemetry()
         self._writer_stop = object()
         self.features=FeatureEngine(); self.builder=MarketStateBuilder()
@@ -186,7 +187,7 @@ class LiveSignalService:
                 age_ms=None
                 if book_state.last_event_time_ms>0:
                     age_ms=max(0,int(datetime.now(timezone.utc).timestamp()*1000)-book_state.last_event_time_ms)
-                context=SignalExecutionContext(latency_ms=self.websocket.latency_ms,spread_bps=spread_bps,orderbook_valid=book_state.valid,orderbook_age_ms=age_ms)
+                context=SignalExecutionContext(latency_ms=self.websocket.latency_ms,spread_bps=spread_bps,orderbook_valid=book_state.valid,orderbook_age_ms=age_ms,data_quality_ok=self._event_persistence_healthy)
                 clusters=tuple(liquidity_state.bid_clusters+liquidity_state.ask_clusters) if liquidity_state.valid else ()
                 signal,msg=self.pipeline.evaluate(state,price,self._atr_from_features(snap),context=context,liquidity_clusters=clusters)
                 if signal.levels is not None and signal.direction.value!="none":
@@ -205,23 +206,16 @@ class LiveSignalService:
         try:
             self._event_publish_queue.put_nowait(event)
         except asyncio.QueueFull:
-            try:
-                self._event_publish_queue.get_nowait()
-                self._event_publish_queue.task_done()
-                self._event_publish_queue.put_nowait(event)
-            except asyncio.QueueEmpty:
-                pass
+            # Never discard raw market events silently. Disable new signals until the cold
+            # persistence queue recovers so research state cannot be mistaken for complete.
+            self._event_persistence_healthy = False
 
     def _enqueue_notification(self, text: str) -> None:
         try:
             self._notification_queue.put_nowait(text)
         except asyncio.QueueFull:
-            try:
-                self._notification_queue.get_nowait()
-                self._notification_queue.task_done()
-                self._notification_queue.put_nowait(text)
-            except asyncio.QueueEmpty:
-                pass
+            # The notification queue is intentionally unbounded; this branch is defensive.
+            raise RuntimeError("notification queue unexpectedly full")
 
     async def _cold_event_publisher(self) -> None:
         while True:
