@@ -37,3 +37,24 @@ class ExecutionRepository:
                 (client_order_id,signal_id,event_type,from_status,to_status,reason,exchange_order_id,event_time)
                 VALUES (:client_order_id,:signal_id,:event_type,:from_status,:to_status,:reason,:exchange_order_id,:event_time)
             """),locals())
+
+    def save_confirmation(self, confirmation) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO execution.confirmations "
+                    "(signal_id,status,created_at,expires_at,confirmed_at,cancelled_at) "
+                    "VALUES (:signal_id,:status,:created_at,:expires_at,:confirmed_at,:cancelled_at) "
+                    "ON CONFLICT (signal_id) DO UPDATE SET status=EXCLUDED.status, "
+                    "expires_at=EXCLUDED.expires_at, confirmed_at=EXCLUDED.confirmed_at, "
+                    "cancelled_at=EXCLUDED.cancelled_at"
+                ),
+                {
+                    "signal_id": confirmation.signal_id,
+                    "status": confirmation.status.value,
+                    "created_at": confirmation.created_at,
+                    "expires_at": confirmation.expires_at,
+                    "confirmed_at": confirmation.created_at if confirmation.status.value == "confirmed" else None,
+                    "cancelled_at": confirmation.created_at if confirmation.status.value == "cancelled" else None,
+                },
+            )
