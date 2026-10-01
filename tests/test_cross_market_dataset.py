@@ -13,7 +13,7 @@ def test_dataset_is_pit_safe_and_chronological():
     t=datetime(2026,1,1,tzinfo=timezone.utc)
     observations=[obs("VIX",t-timedelta(days=30+i),100+i) for i in range(21)]
     observations.append(obs("VIX",t,200))
-    late=CrossMarketObservation("VIX",t+timedelta(days=1),999,t+timedelta(days=2),"test")
+    late=CrossMarketObservation("VIX",t+timedelta(days=1),t+timedelta(days=2),999,"test")
     observations.append(late)
     candles=[Candle(t+timedelta(minutes=i),100+i,101+i,99+i) for i in range(0,61)]
     ds=CrossMarketDatasetBuilder().build("BTCUSDT",[t],observations,candles,horizons=(60,),min_samples=20,window_size=20)
