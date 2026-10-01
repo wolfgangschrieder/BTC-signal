@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class EventType(StrEnum):
     TRADE = "trade"
+    TICKER = "ticker"
     CANDLE = "candle"
     ORDERBOOK_UPDATE = "orderbook_update"
     ORDERBOOK_SNAPSHOT = "orderbook_snapshot"
