@@ -6,6 +6,7 @@ from research_os.features.derivatives import DerivativesState
 @dataclass(frozen=True)
 class DerivativesOutcome:
     state_timestamp: datetime
+    state: DerivativesState
     outcome_timestamp: datetime
     horizon_minutes: int
     return_pct: float
@@ -32,4 +33,4 @@ def compute_outcome(state: DerivativesState, state_timestamp: datetime, candles,
     mfe=(max(highs)-entry)/entry
     mae=(min(lows)-entry)/entry
     oi_change_after=None if oi_before in (None,0) or oi_after is None else (oi_after-oi_before)/abs(oi_before)
-    return DerivativesOutcome(state_timestamp,final.timestamp,horizon_minutes,return_pct,mfe,mae,None,oi_change_after,None)
+    return DerivativesOutcome(state_timestamp,state,final.timestamp,horizon_minutes,return_pct,mfe,mae,None,oi_change_after,None)
