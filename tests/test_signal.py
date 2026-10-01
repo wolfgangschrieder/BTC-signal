@@ -50,3 +50,12 @@ def test_signal_guard_rejects_probability_below_threshold():
     ok,reasons=SignalGuard().validate(rejected)
     assert not ok
     assert "probability" in reasons[0]
+
+
+def test_signal_guard_fails_closed_on_data_quality_degradation():
+    from research_os.signals.guard import SignalGuard, SignalExecutionContext
+    a,p=inputs()
+    s=SignalEngine().build(a,p,100,2)
+    ok,reasons=SignalGuard().validate(s, SignalExecutionContext(data_quality_ok=False))
+    assert not ok
+    assert reasons == ("data quality degraded",)
