@@ -109,12 +109,11 @@ class LiveSignalService:
             if self.publisher: await self.publisher(event)
             if topic.startswith("kline.") and len(self.closes)>=6:
                 now=datetime.now(timezone.utc)
-                snap=self.features.build(
-                    self.symbol,event.event_time,list(self.closes),
-                    highs=list(self.highs),lows=list(self.lows),orderbook=self.orderbook.state
-                )
-                mtf_snapshot=self.mtf.build(self.symbol,list(self.bars_1m),event.event_time,as_of=now)
-                flow=self.orderflow.build(list(self.trades),event.event_time,cumulative_delta_base=0.0,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
+                closes=list(self.closes); highs=list(self.highs); lows=list(self.lows); bars=list(self.bars_1m); trades=list(self.trades); book_state=self.orderbook.state
+                snap_task=asyncio.to_thread(self.features.build,self.symbol,event.event_time,closes,highs=highs,lows=lows,orderbook=book_state)
+                mtf_task=asyncio.to_thread(self.mtf.build,self.symbol,bars,event.event_time,as_of=now)
+                flow_task=self.orderflow.build_async(trades,event.event_time,cumulative_delta_base=0.0,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
+                snap,mtf_snapshot,flow=await asyncio.gather(snap_task,mtf_task,flow_task)
                 flow_values=snapshot_features(flow)
                 flow_values["orderflow_cumulative_delta"]=self.cumulative_delta
                 cutoff=event.event_time.timestamp()-3600
@@ -147,7 +146,7 @@ class LiveSignalService:
                 extra.update(liquidity_values)
                 availability={key: ((flow.available and value is not None) if key.startswith("orderflow_") else (deriv.available and value is not None)) for key,value in extra.items()}
                 for key,value in liquidity_values.items(): availability[key]=liquidity_state.valid and value is not None
-                state=self.builder.build_multi(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap,extra_values=extra,extra_availability=availability)
+                state=await self.builder.build_multi_async(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap,extra_values=extra,extra_availability=availability)
                 self.previous_derivatives_price=float(event.payload["close"])
                 self.previous_funding=self.derivatives_funding
                 self.previous_oi=self.derivatives_oi
