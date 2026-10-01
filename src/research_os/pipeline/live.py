@@ -4,7 +4,8 @@ from collections.abc import Awaitable,Callable
 from datetime import datetime,timezone
 import asyncio
 from research_os.exchanges.bybit.normalizer import BybitNormalizer
-from research_os.exchanges.bybit.orderbook import OrderBook
+from research_os.exchanges.bybit.orderbook import OrderBook, OrderBookError
+from research_os.exchanges.bybit.client import BybitRestClient
 from research_os.exchanges.bybit.ws import BybitWebSocket,BybitWebSocketConfig
 from research_os.market.state_builder import MarketStateBuilder
 from research_os.features.engine import FeatureEngine
@@ -24,7 +25,7 @@ EventPublisher=Callable[[object],Awaitable[None]]
 class LiveSignalService:
     """Read-only Bybit live loop. It never sends trading requests."""
     def __init__(self,symbol="BTCUSDT",interval="1",publisher:EventPublisher|None=None,telegram:TelegramClient|None=None,config=None):
-        self.symbol=symbol; self.interval=interval; self.publisher=publisher; self.telegram=telegram; self.closes=deque(maxlen=200); self.highs=deque(maxlen=200); self.lows=deque(maxlen=200); self._last_candle_start=None; self.orderbook=OrderBook(symbol, max_levels=50)
+        self.symbol=symbol; self.interval=interval; self.publisher=publisher; self.telegram=telegram; self.closes=deque(maxlen=200); self.highs=deque(maxlen=200); self.lows=deque(maxlen=200); self._last_candle_start=None; self.orderbook=OrderBook(symbol, max_levels=50); self.rest=BybitRestClient(); self._last_orderbook_update=datetime.min.replace(tzinfo=timezone.utc)
         self.features=FeatureEngine(); self.builder=MarketStateBuilder()
         self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(),TelegramFormatter(),SignalGuard())
         self.outcomes=SignalOutcomeRepository()
@@ -41,6 +42,7 @@ class LiveSignalService:
             elif topic.startswith("orderbook."):
                 quality = self.orderbook.apply(message)
                 if quality is not None: return
+                self._last_orderbook_update=datetime.now(timezone.utc)
                 event = BybitNormalizer.orderbook(message)
                 if self.publisher: await self.publisher(event)
                 return
@@ -70,5 +72,13 @@ class LiveSignalService:
                 return feature.value
         return None
 
-    async def run(self): await self.websocket.run()
+    async def bootstrap_orderbook(self):
+        payload = await self.rest.get_orderbook(symbol=self.symbol, limit=50)
+        data = payload.get('result', {})
+        self.orderbook.restore_snapshot(data.get('b', []), data.get('a', []), data.get('u', 0), data.get('seq'), payload.get('time', 0))
+        self._last_orderbook_update = datetime.now(timezone.utc)
+
+    async def run(self):
+        await self.bootstrap_orderbook()
+        await self.websocket.run()
     async def stop(self): await self.websocket.stop()
