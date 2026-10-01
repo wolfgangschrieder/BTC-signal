@@ -11,6 +11,7 @@ branch_labels=None
 depends_on=None
 
 def upgrade():
+    op.execute("CREATE SCHEMA IF NOT EXISTS intelligence")
     op.create_table(
         "cross_market_observations",
         sa.Column("id",sa.BigInteger(),sa.Identity(),primary_key=True),
