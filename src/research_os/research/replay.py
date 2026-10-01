@@ -89,4 +89,4 @@ class ReplayEngine:
                     sl=c.high>=levels.stop_loss; tp=c.low<=levels.tp1
                     if sl or tp:
                         return (0 if sl else 1),(entry-levels.stop_loss)/entry if sl else (entry-levels.tp1)/entry
-        return None,None
+        return 0,None
