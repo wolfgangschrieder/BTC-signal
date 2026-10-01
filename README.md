@@ -15,11 +15,11 @@ Research-first BTCUSDT signal platform. The system analyzes market data and prod
 `BYBIT → RAW → NORMALIZED → DATA QUALITY → FEATURES → FACTORS → MARKET STATE VECTOR → ANALYSIS → PROBABILITY → SIGNAL → HUMAN → OUTCOME → RESEARCH MEMORY → META-RESEARCH`
 
 ## Current stage
-Stage 20: cross-market foundation. Stages are vertical engineering slices; production launch is gated separately by validation and operational acceptance.
+Stage 21: external event evidence foundation. Stages are vertical engineering slices; production launch is gated separately by validation and operational acceptance.
 
 ## Production roadmap
 1. Stage 20 — cross-market / macro data foundation
-2. Stage 21 — external event/news evidence
+2. Stage 21 — external event/news evidence (PIT-safe foundation implemented)
 3. Stage 22 — research dataset builder + PIT-safe outcome integration
 4. Stage 23 — calibration and model validation
 5. Stage 24 — signal/risk validation and paper-trading shadow mode
