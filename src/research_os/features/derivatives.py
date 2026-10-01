@@ -82,13 +82,14 @@ def classify_derivatives_state(funding_rate, oi_change, price_oi_divergence,
     funding_regime = "positive_funding" if funding_rate is not None and funding_rate > 0 else "negative_funding" if funding_rate is not None and funding_rate < 0 else "neutral"
     oi_regime = "rising" if oi_change is not None and oi_change > 0 else "falling" if oi_change is not None and oi_change < 0 else "neutral"
     total_liq=(liquidation_long or 0.0)+(liquidation_short or 0.0)
-    stress="high" if total_liq > 0 else "none"
+    # Absolute liquidation volume is not a stress measure without a historical baseline.
+    stress="observed" if total_liq > 0 else "none"
     price_oi = "bearish_divergence" if price_oi_divergence == -1 else "bullish_divergence" if price_oi_divergence == 1 else "aligned_or_neutral"
     funding_price = "bullish_divergence" if funding_price_divergence == 1 else "bearish_divergence" if funding_price_divergence == -1 else "aligned_or_neutral"
     signals=sum(x != "aligned_or_neutral" for x in (price_oi,funding_price))
     conflicting=(price_oi == "bullish_divergence" and funding_price == "bearish_divergence") or (price_oi == "bearish_divergence" and funding_price == "bullish_divergence")
     alignment="conflicting" if conflicting else "neutral"
-    strength=min(1.0, 0.25*signals + (0.25 if abs(liquidation_imbalance or 0) >= 0.5 else 0.0))
+    strength=min(1.0, 0.25*signals)
     positioning="crowded_long" if funding_rate is not None and funding_rate > 0 and oi_change is not None and oi_change > 0 else "crowded_short" if funding_rate is not None and funding_rate < 0 and oi_change is not None and oi_change > 0 else "mixed"
     return DerivativesState(funding_regime,oi_regime,positioning,stress,price_oi,funding_price,alignment,strength,True)
 
