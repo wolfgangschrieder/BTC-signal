@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
+import asyncio
 from .state_vector import MarketStateVector
 from research_os.features.models import FeatureSnapshot
 
@@ -34,6 +35,12 @@ class MarketStateBuilder:
         if extra_availability: availability.update(extra_availability)
         numeric,categorical=_split(values)
         return MarketStateVector.build(symbol,timestamp,decision_time,pit,numeric,availability,data_quality or {},snapshot.version,categorical=categorical)
+
+    async def build_async(self, *args, **kwargs):
+        return await asyncio.to_thread(self.build, *args, **kwargs)
+
+    async def build_multi_async(self, *args, **kwargs):
+        return await asyncio.to_thread(self.build_multi, *args, **kwargs)
 
     def build_multi(self,symbol,timestamp,decision_time,pit,snapshot,base_snapshot=None,data_quality=None,extra_values=None,extra_availability=None):
         values={}; availability={}
