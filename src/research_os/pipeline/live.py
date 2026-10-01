@@ -19,6 +19,7 @@ from research_os.signals.outcomes import SignalOutcome,OutcomeStatus
 from research_os.signals.outcome_repository import SignalOutcomeRepository
 from research_os.pipeline.realtime import RealtimeSignalPipeline
 from research_os.database.session import SessionLocal
+from research_os.market.state_repository import MarketStateRepository
 
 EventPublisher=Callable[[object],Awaitable[None]]
 
@@ -28,7 +29,7 @@ class LiveSignalService:
         self.symbol=symbol; self.interval=interval; self.publisher=publisher; self.telegram=telegram; self.closes=deque(maxlen=200); self.highs=deque(maxlen=200); self.lows=deque(maxlen=200); self._last_candle_start=None; self.orderbook=OrderBook(symbol, max_levels=50); self.rest=BybitRestClient(); self._last_orderbook_update=datetime.min.replace(tzinfo=timezone.utc)
         self.features=FeatureEngine(); self.builder=MarketStateBuilder()
         self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(),TelegramFormatter(),SignalGuard())
-        self.outcomes=SignalOutcomeRepository()
+        self.outcomes=SignalOutcomeRepository(); self.states=MarketStateRepository()
         self.websocket=BybitWebSocket([f"kline.{interval}.{symbol}",f"tickers.{symbol}",f"orderbook.50.{symbol}"],self._handle,config or BybitWebSocketConfig())
     async def _handle(self,message):
         topic=message.get("topic","")
@@ -52,6 +53,10 @@ class LiveSignalService:
                 now=datetime.now(timezone.utc); snap=self.features.build(self.symbol,event.event_time,list(self.closes),highs=list(self.highs),lows=list(self.lows),orderbook=self.orderbook.state)
                 state=self.builder.build(self.symbol,event.event_time,now,event.point_in_time_available_at,snap,{})
                 signal,msg=self.pipeline.evaluate(state,float(event.payload["close"]),self._atr_from_features(snap))
+                def save_state():
+                    with SessionLocal() as session:
+                        self.states.save(session, state); session.commit()
+                await asyncio.to_thread(save_state)
                 if signal.levels is not None and signal.direction.value!="none":
                     await self._record_pending(signal)
                 if msg and self.telegram: await self.telegram.send(msg.text)
