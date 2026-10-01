@@ -94,7 +94,7 @@ class ExecutionService:
                 raise KeyError("unknown client_order_id")
             allowed={
                 ExecutionStatus.CREATED:{ExecutionStatus.SUBMITTING,ExecutionStatus.CANCELLED,ExecutionStatus.BLOCKED},
-                ExecutionStatus.SUBMITTING:{ExecutionStatus.SUBMITTED,ExecutionStatus.REJECTED,ExecutionStatus.CANCELLED},
+                ExecutionStatus.SUBMITTING:{ExecutionStatus.SUBMITTED,ExecutionStatus.PARTIALLY_FILLED,ExecutionStatus.FILLED,ExecutionStatus.REJECTED,ExecutionStatus.CANCELLED},
                 ExecutionStatus.SUBMITTED:{ExecutionStatus.PARTIALLY_FILLED,ExecutionStatus.FILLED,ExecutionStatus.CANCELLED,ExecutionStatus.REJECTED},
                 ExecutionStatus.PARTIALLY_FILLED:{ExecutionStatus.PARTIALLY_FILLED,ExecutionStatus.FILLED,ExecutionStatus.CANCELLED},
                 ExecutionStatus.FILLED:set(),
