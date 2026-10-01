@@ -42,6 +42,8 @@ class LiveSignalService:
         self.mtf=MultiTimeframeFeatureEngine()
         self.liquidity=LiquidityEngine()
         self._liquidity_state=None
+        self._last_liquidity_compute_monotonic=0.0
+        self._liquidity_compute_interval_seconds=0.05
         self._last_candle_start=None
         self.orderbook=OrderBook(symbol,max_levels=50)
         self.rest=BybitRestClient()
@@ -100,8 +102,11 @@ class LiveSignalService:
                 self._last_orderbook_update=datetime.now(timezone.utc)
                 book_state=self.orderbook.state
                 if book_state.valid and book_state.bids and book_state.asks:
-                    mid=(float(book_state.bids[0].price)+float(book_state.asks[0].price))/2
-                    self._liquidity_state=self.liquidity.build(book_state,mid,book_state.last_event_time_ms)
+                    now_monotonic=asyncio.get_running_loop().time()
+                    if now_monotonic-self._last_liquidity_compute_monotonic >= self._liquidity_compute_interval_seconds:
+                        mid=(float(book_state.bids[0].price)+float(book_state.asks[0].price))/2
+                        self._liquidity_state=self.liquidity.build(book_state,mid,book_state.last_event_time_ms)
+                        self._last_liquidity_compute_monotonic=now_monotonic
                 else:
                     self._liquidity_state=None
                 event=BybitNormalizer.orderbook(message)
