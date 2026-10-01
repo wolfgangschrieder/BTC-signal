@@ -36,7 +36,21 @@ class MultiTimeframeAlignment:
     bullish_timeframes: tuple[Timeframe,...]
     bearish_timeframes: tuple[Timeframe,...]
     conflicting: bool
-    version: str="mtf-alignment-v1"
+    state: MultiTimeframeState | None = None
+    version: str="mtf-alignment-v2"
+
+@dataclass(frozen=True)
+class MultiTimeframeState:
+    trend: str
+    momentum: str
+    volatility: str
+    structure: str
+    breakout: str
+    pullback: str
+    alignment: str
+    conflict: bool
+    strength: float
+    version: str="mtf-state-v1"
 
 def _bucket_start(ts: datetime, minutes: int) -> datetime:
     ts=ts.astimezone(timezone.utc)
@@ -129,4 +143,30 @@ def analyze_alignment(mtf: MultiTimeframeSnapshot)->MultiTimeframeAlignment:
         bullish_timeframes=tuple(bullish),
         bearish_timeframes=tuple(bearish),
         conflicting=bool(bullish and bearish),
+        state=classify_mtf_state(mtf),
     )
+
+def _feature(snapshot, name):
+    if snapshot is None: return None
+    for item in snapshot.features:
+        if item.name == name: return item.value if item.available else None
+    return None
+
+def classify_mtf_state(mtf):
+    returns=[]; vols=[]
+    for tf in (Timeframe.M15, Timeframe.H1, Timeframe.H4, Timeframe.D1):
+        snap=mtf.snapshots.get(tf); r=_feature(snap,"return_5"); v=_feature(snap,"realized_vol")
+        if r is not None: returns.append(r)
+        if v is not None: vols.append(v)
+    bullish=sum(x>0 for x in returns); bearish=sum(x<0 for x in returns)
+    trend="bullish" if bullish and not bearish else "bearish" if bearish and not bullish else "mixed" if bullish and bearish else "unknown"
+    total=sum(returns); momentum="positive" if total>0 else "negative" if total<0 else "neutral"
+    avg_vol=sum(vols)/len(vols) if vols else None
+    volatility="high" if avg_vol is not None and avg_vol>=0.02 else "low" if avg_vol is not None and avg_vol<=0.003 else "normal" if avg_vol is not None else "unknown"
+    r15=_feature(mtf.snapshots.get(Timeframe.M15),"return_5")
+    structure="up" if r15 is not None and r15>0 else "down" if r15 is not None and r15<0 else "unknown"
+    breakout="active" if r15 is not None and abs(r15)>=0.02 else "none" if r15 is not None else "unknown"
+    pullback="possible" if r15 is not None and returns and r15*total<0 else "none" if r15 is not None else "unknown"
+    alignment="bullish" if bullish and not bearish else "bearish" if bearish and not bullish else "conflicting" if bullish and bearish else "neutral"
+    strength=max(bullish,bearish)/max(len(returns),1)
+    return MultiTimeframeState(trend,momentum,volatility,structure,breakout,pullback,alignment,bool(bullish and bearish),strength)
