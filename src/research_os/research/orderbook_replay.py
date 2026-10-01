@@ -41,4 +41,6 @@ def replay_liquidity_at_decision(events, decision_time, symbol, liquidity_engine
         return None
     if not state.bids or not state.asks:
         return None
-    reference_price=(float(state.bids[0].price)+float(state.asks[0].price))/2.0\n    timestamp_ms=int(decision_time.timestamp()*1000)\n    return liquidity_engine.build(state, reference_price, timestamp_ms=timestamp_ms)\n
+    reference_price=(float(state.bids[0].price)+float(state.asks[0].price))/2.0
+    timestamp_ms=int(decision_time.timestamp()*1000)
+    return liquidity_engine.build(state, reference_price, timestamp_ms=timestamp_ms)
