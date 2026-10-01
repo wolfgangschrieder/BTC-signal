@@ -143,8 +143,7 @@ class ResearchDatasetBuilder:
     @staticmethod
     def _decision_candle(candles: Sequence[ReplayCandle], timestamp: datetime) -> ReplayCandle | None:
         candidates = [
-            candle
-            for candle in candles
+            candle for candle in candles
             if candle.event_time == timestamp
             and (candle.point_in_time_available_at or candle.event_time) <= timestamp
         ]
@@ -155,28 +154,56 @@ class ResearchDatasetBuilder:
         return [candle for candle in candles if start < candle.event_time <= end]
 
     @staticmethod
-    def audit_pit(dataset: ResearchDataset) -> tuple[DatasetPITViolation, ...]:
+    def audit_pit(
+        dataset: ResearchDataset,
+        external_events: Sequence[ExternalEvent] = (),
+    ) -> tuple[DatasetPITViolation, ...]:
+        source_by_id = {(event.source, event.event_id): event for event in external_events}
         violations: list[DatasetPITViolation] = []
+
         for row in dataset.rows:
             if row.outcome_time <= row.decision_time:
                 violations.append(DatasetPITViolation(row.decision_time, "outcome_time", row.outcome_time))
+
             for event_id in row.external_event_ids:
-                # Event IDs are materialized only after ExternalEventEngine PIT filtering.
-                # The detailed event timestamp audit is performed against source events below.
-                if not event_id:
-                    violations.append(DatasetPITViolation(row.decision_time, "external_event_id", row.decision_time))
+                matches = [event for (source, eid), event in source_by_id.items() if eid == event_id]
+                for event in matches:
+                    if event.point_in_time_available_at > row.decision_time:
+                        violations.append(
+                            DatasetPITViolation(
+                                row.decision_time,
+                                f"external_event:{event_id}",
+                                event.point_in_time_available_at,
+                            )
+                        )
         return tuple(violations)
 
     @staticmethod
     def chronological_split(
         dataset: ResearchDataset,
         train_ratio: float = 0.7,
+        purge_minutes: int | None = None,
     ) -> tuple[ResearchDataset, ResearchDataset]:
         if not 0.0 < train_ratio < 1.0:
             raise ValueError("train_ratio must be between 0 and 1")
         rows = tuple(sorted(dataset.rows, key=lambda row: row.decision_time))
+        if not rows:
+            empty = ResearchDataset(dataset.symbol, dataset.version + ":train", (), 0)
+            return empty, ResearchDataset(dataset.symbol, dataset.version + ":test", (), 0)
+
         cut = int(len(rows) * train_ratio)
+        if cut <= 0 or cut >= len(rows):
+            raise ValueError("train_ratio produces an empty split")
+
+        purge = dataset.rows[0].horizon_minutes if purge_minutes is None else purge_minutes
+        if purge < 0:
+            raise ValueError("purge_minutes must be non-negative")
+
+        train = rows[:cut]
+        boundary = train[-1].decision_time + timedelta(minutes=purge)
+        test = tuple(row for row in rows[cut:] if row.decision_time > boundary)
+
         return (
-            ResearchDataset(dataset.symbol, dataset.version + ":train", rows[:cut], 0),
-            ResearchDataset(dataset.symbol, dataset.version + ":test", rows[cut:], 0),
+            ResearchDataset(dataset.symbol, dataset.version + ":train", train, 0),
+            ResearchDataset(dataset.symbol, dataset.version + ":test", test, len(rows[cut:]) - len(test)),
         )
