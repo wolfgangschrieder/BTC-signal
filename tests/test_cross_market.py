@@ -50,3 +50,14 @@ def test_cross_market_rejects_latency_skew():
     assert not snapshot.synchronized
     assert snapshot.max_event_time_skew_seconds == 600
     assert not any(snapshot.availability.values())
+
+
+def test_cross_market_rejects_source_latency_skew():
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    observations=[
+        CrossMarketObservation("SPX",t,t+timedelta(seconds=1),5000,"fast"),
+        CrossMarketObservation("VIX",t,t+timedelta(seconds=61),20,"slow"),
+    ]
+    snapshot=CrossMarketFeatureEngine().build(t,observations,as_of=t+timedelta(seconds=61),max_source_latency_skew_seconds=30)
+    assert not snapshot.synchronized
+    assert snapshot.max_source_latency_skew_seconds == 60
