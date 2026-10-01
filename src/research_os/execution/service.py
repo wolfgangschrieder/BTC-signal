@@ -7,6 +7,7 @@ from research_os.execution.guard import ExecutionGuard, ExecutionGuardContext
 from research_os.execution.order_intent import OrderIntent
 from research_os.execution.confirmation import PendingConfirmation, ConfirmationStatus
 from research_os.signals.models import SignalResult
+from research_os.execution.adapter import ExecutionAdapter, AdapterOrderStatus
 
 class ExecutionStatus(StrEnum):
     CREATED="created"
@@ -31,11 +32,12 @@ class ExecutionRecord:
 
 class ExecutionService:
     """Orchestrates human-confirmed execution state; exchange I/O is injected."""
-    version="execution-service-v1"
+    version="execution-service-v2"
 
-    def __init__(self, guard: ExecutionGuard | None=None, repository=None):
+    def __init__(self, guard: ExecutionGuard | None=None, repository=None, adapter: ExecutionAdapter | None=None):
         self.guard=guard or ExecutionGuard()
         self.repository=repository
+        self.adapter=adapter
         self._records: dict[str,ExecutionRecord]={}
         self._lock=Lock()
 
@@ -63,6 +65,21 @@ class ExecutionService:
                 self.repository.save(record)
                 self.repository.append_event(record.client_order_id,record.signal_id,"execution_created",record.status.value,now)
             return record
+
+    def submit(self, client_order_id: str, now: datetime | None=None) -> ExecutionRecord:
+        if self.adapter is None:
+            raise RuntimeError("execution adapter is not configured")
+        now=now or datetime.now(timezone.utc)
+        record=self.get(client_order_id)
+        if record is None:
+            raise KeyError("unknown client_order_id")
+        if record.status is not ExecutionStatus.CREATED:
+            raise ValueError(f"cannot submit from {record.status.value}")
+        self.transition(client_order_id,ExecutionStatus.SUBMITTING,now)
+        result=self.adapter.submit(record.intent)
+        if result.status is AdapterOrderStatus.SUBMITTED:
+            return self.transition(client_order_id,ExecutionStatus.SUBMITTED,now,exchange_order_id=result.exchange_order_id)
+        return self.transition(client_order_id,ExecutionStatus.REJECTED,now,reason=result.reason,exchange_order_id=result.exchange_order_id)
 
     def get(self, client_order_id: str) -> ExecutionRecord | None:
         with self._lock:
