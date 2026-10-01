@@ -3,9 +3,9 @@ from .models import CrossMarketObservation, CrossMarketSnapshot
 from .state import classify
 
 class CrossMarketFeatureEngine:
-    version="cross-market-v1"
+    version="cross-market-v2"
 
-    def build(self,timestamp,observations,as_of=None):
+    def build(self,timestamp,observations,as_of=None,previous=None):
         cutoff=as_of or timestamp
         latest={}
         for obs in observations:
@@ -19,6 +19,10 @@ class CrossMarketFeatureEngine:
             values[asset]=obs.value
             availability[asset]=True
             sources[asset]=obs.source
+        if previous is not None:
+            values.update(returns(CrossMarketSnapshot(timestamp,values,availability,sources,self.version),previous))
+            availability.update({f"{asset}_return": value is not None for asset,value in
+                                 {k:v for k,v in values.items() if k.endswith("_return")}.items()})
         return CrossMarketSnapshot(timestamp,values,availability,sources,self.version)
 
     def state(self,snapshot):
@@ -27,6 +31,8 @@ class CrossMarketFeatureEngine:
 def returns(snapshot,previous):
     out={}
     for asset,value in snapshot.values.items():
+        if asset.endswith("_return"):
+            continue
         prev=previous.values.get(asset) if previous else None
         out[f"{asset}_return"]=(value-prev)/abs(prev) if value is not None and prev not in (None,0) else None
     return out
