@@ -4,6 +4,7 @@ from collections.abc import Awaitable,Callable
 from datetime import datetime,timezone
 import asyncio
 from research_os.exchanges.bybit.normalizer import BybitNormalizer
+from research_os.exchanges.bybit.orderbook import OrderBook
 from research_os.exchanges.bybit.ws import BybitWebSocket,BybitWebSocketConfig
 from research_os.market.state_builder import MarketStateBuilder
 from research_os.features.engine import FeatureEngine
@@ -23,7 +24,7 @@ EventPublisher=Callable[[object],Awaitable[None]]
 class LiveSignalService:
     """Read-only Bybit live loop. It never sends trading requests."""
     def __init__(self,symbol="BTCUSDT",interval="1",publisher:EventPublisher|None=None,telegram:TelegramClient|None=None,config=None):
-        self.symbol=symbol; self.interval=interval; self.publisher=publisher; self.telegram=telegram; self.closes=deque(maxlen=200); self.highs=deque(maxlen=200); self.lows=deque(maxlen=200); self._last_candle_start=None
+        self.symbol=symbol; self.interval=interval; self.publisher=publisher; self.telegram=telegram; self.closes=deque(maxlen=200); self.highs=deque(maxlen=200); self.lows=deque(maxlen=200); self._last_candle_start=None; self.orderbook=OrderBook(symbol, max_levels=50)
         self.features=FeatureEngine(); self.builder=MarketStateBuilder()
         self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(),TelegramFormatter(),SignalGuard())
         self.outcomes=SignalOutcomeRepository()
@@ -37,11 +38,16 @@ class LiveSignalService:
                 if self._last_candle_start==event.event_time: return
                 self._last_candle_start=event.event_time; self.closes.append(float(p["close"])); self.highs.append(float(p["high"])); self.lows.append(float(p["low"]))
             elif topic.startswith("tickers."): event=BybitNormalizer.ticker(message)
-            elif topic.startswith("orderbook."): return
+            elif topic.startswith("orderbook."):
+                quality = self.orderbook.apply(message)
+                if quality is not None: return
+                event = BybitNormalizer.orderbook(message)
+                if self.publisher: await self.publisher(event)
+                return
             else: return
             if self.publisher: await self.publisher(event)
             if topic.startswith("kline.") and len(self.closes)>=6:
-                now=datetime.now(timezone.utc); snap=self.features.build(self.symbol,event.event_time,list(self.closes),highs=list(self.highs),lows=list(self.lows))
+                now=datetime.now(timezone.utc); snap=self.features.build(self.symbol,event.event_time,list(self.closes),highs=list(self.highs),lows=list(self.lows),orderbook=self.orderbook.state)
                 state=self.builder.build(self.symbol,event.event_time,now,event.point_in_time_available_at,snap,{})
                 signal,msg=self.pipeline.evaluate(state,float(event.payload["close"]),self._atr_from_features(snap))
                 if signal.levels is not None and signal.direction.value!="none":
