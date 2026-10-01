@@ -34,3 +34,9 @@ def replay_many(events: Iterable[HistoricalOrderBookEvent], decision_times: Iter
         if state is not None:
             result.append((decision_time,state))
     return tuple(result)
+
+def replay_liquidity_at_decision(events, decision_time, symbol, liquidity_engine, max_levels=50):
+    state = replay_to(events, decision_time, symbol, max_levels)
+    if state is None:
+        return None
+    return liquidity_engine.build(state, decision_time)
