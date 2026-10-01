@@ -38,3 +38,15 @@ def test_cross_market_rejects_invalid_observation():
         CrossMarketObservation("DXY",t,t,float("inf"),"test")
     with pytest.raises(ValueError):
         CrossMarketObservation("DXY",t,t-timedelta(seconds=1),100,"test")
+
+
+def test_cross_market_rejects_latency_skew():
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    observations=[
+        CrossMarketObservation("SPX",t,t,5000,"source-a"),
+        CrossMarketObservation("VIX",t+timedelta(minutes=10),t+timedelta(minutes=10),20,"source-b"),
+    ]
+    snapshot=CrossMarketFeatureEngine().build(t+timedelta(minutes=10),observations,as_of=t+timedelta(minutes=10),max_skew_seconds=300)
+    assert not snapshot.synchronized
+    assert snapshot.max_event_time_skew_seconds == 600
+    assert not any(snapshot.availability.values())
