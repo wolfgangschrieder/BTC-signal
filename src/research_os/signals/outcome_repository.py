@@ -1,0 +1,28 @@
+from __future__ import annotations
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+from research_os.signals.outcomes import OutcomeStatus, SignalOutcome
+
+class SignalOutcomeRepository:
+    def record_pending(self,session:Session,outcome:SignalOutcome)->None:
+        session.execute(text("""INSERT INTO signal_outcomes
+        (signal_id,symbol,direction,signal_time,entry_price,stop_loss,tp1,tp2,tp3,probability,status,horizon_minutes,reason)
+        VALUES (:id,:symbol,:direction,:time,:entry,:sl,:tp1,:tp2,:tp3,:prob,:status,:horizon,:reason)
+        ON CONFLICT (signal_id) DO NOTHING"""),dict(id=outcome.signal_id,symbol=outcome.symbol,direction=outcome.direction, time=outcome.signal_time,entry=outcome.entry_price,sl=outcome.stop_loss,tp1=outcome.tp1,tp2=outcome.tp2,tp3=outcome.tp3,prob=outcome.probability,status=outcome.status.value,horizon=outcome.horizon_minutes,reason=outcome.reason))
+
+    def summary(self,session:Session,since:datetime)->dict:
+        rows=session.execute(text("""SELECT status, count(*) FROM signal_outcomes
+        WHERE resolved_at >= :since AND status IN ('win','loss','expired')
+        GROUP BY status"""),{"since":since}).all()
+        counts={str(k):int(v) for k,v in rows}; total=sum(counts.values())
+        wins=counts.get("win",0); losses=counts.get("loss",0); expired=counts.get("expired",0)
+        return {"total":total,"wins":wins,"losses":losses,"expired":expired,"win_rate":wins/(wins+losses) if wins+losses else None}
+
+    def pending(self,session:Session,now:datetime):
+        return session.execute(text("""SELECT signal_id,symbol,direction,signal_time,entry_price,stop_loss,tp1,tp2,tp3,probability,horizon_minutes
+        FROM signal_outcomes WHERE status='pending' AND signal_time < :now ORDER BY signal_time"""),{"now":now}).mappings().all()
+
+    def resolve(self,session:Session,signal_id,status,realized_return=None,mfe=None,mae=None,resolved_at=None,reason=None):
+        session.execute(text("""UPDATE signal_outcomes SET status=:status,realized_return=:ret,mfe=:mfe,mae=:mae,resolved_at=:resolved,reason=:reason WHERE signal_id=:id"""),
+                        {"status":status.value if hasattr(status,"value") else status,"ret":realized_return,"mfe":mfe,"mae":mae,"resolved":resolved_at or datetime.now(timezone.utc),"reason":reason,"id":signal_id})
