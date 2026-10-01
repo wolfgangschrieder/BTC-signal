@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
-from research_os.research.research_dataset import ResearchDataset, ResearchDatasetRepository, ResearchDatasetRow
+from research_os.research.research_dataset import ResearchDataset, ResearchDatasetRow
+from research_os.research.research_dataset_repository import ResearchDatasetRepository
 
 
 class FakeResult:
@@ -24,17 +25,10 @@ def sample():
         100.0,
         60,
         datetime(2026, 1, 2, 13, tzinfo=timezone.utc),
-        0.01,
-        0.02,
-        -0.01,
+        0.01, 0.02, -0.01,
         (("atr", 1.2),),
         (("DOLLAR_BROAD", 1.0, 0.5, 0.8, 30, True),),
-        1,
-        1,
-        0.5,
-        0.9,
-        ("macro",),
-        ("evt-1",),
+        1, 1, 0.5, 0.9, ("macro",), ("evt-1",),
     )
     return ResearchDataset("BTCUSDT", "research-dataset-v2:60:3600:0", (row,), 0)
 
