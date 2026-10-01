@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     bybit_api_key:str=""; bybit_api_secret:str=""
     telegram_bot_token:str=""; telegram_chat_id:str=""
     signal_min_probability:float=Field(default=.70,ge=0,le=1); signal_min_ev:float=0.0
+    signal_guard_max_latency_ms:float=500.0
+    signal_guard_max_spread_bps:float=10.0
+    signal_guard_max_orderbook_age_ms:int=5000
     report_timezone:str="Europe/Moscow"; report_hour:int=20; report_minute:int=0
     fred_api_key:str=""
     cross_market_enabled:bool=False
