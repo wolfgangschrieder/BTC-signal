@@ -1,7 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
-
 from .models import CrossMarketObservation
 from .normalization import normalize_past_only, RollingNormalization
 
@@ -10,13 +9,12 @@ class CrossMarketResearchSnapshot:
     timestamp: datetime
     observations: dict[str,CrossMarketObservation]
     normalized: dict[str,RollingNormalization]
-    version: str="cross-market-research-v1"
+    version: str="cross-market-research-v2"
 
 class CrossMarketResearchEngine:
-    def build(self,timestamp,observations,as_of=None,min_samples=20):
+    def build(self,timestamp,observations,as_of=None,min_samples=20,window_size=252):
         cutoff=as_of or timestamp
-        eligible=[o for o in observations
-                  if o.timestamp <= timestamp and o.point_in_time_available_at <= cutoff]
+        eligible=[o for o in observations if o.timestamp <= timestamp and o.point_in_time_available_at <= cutoff]
         latest={}
         for obs in eligible:
             old=latest.get(obs.asset)
@@ -25,10 +23,9 @@ class CrossMarketResearchEngine:
         normalized={}
         for asset,current in latest.items():
             history=[o for o in observations
-                     if o.asset==asset
-                     and o.timestamp < current.timestamp
+                     if o.asset==asset and o.timestamp < current.timestamp
                      and o.point_in_time_available_at <= cutoff]
             normalized[asset]=normalize_past_only(
-                asset,current.timestamp,current.value,history,min_samples
+                asset,current.timestamp,current.value,history,min_samples,window_size
             )
         return CrossMarketResearchSnapshot(timestamp,latest,normalized)
