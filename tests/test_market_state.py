@@ -30,3 +30,16 @@ def test_msv_fingerprint_changes_when_categorical_state_changes():
     a=MarketStateVector.build("BTCUSDT",t,t,t,{"x":1},{"x":True},{},categorical={"trend":"bullish"})
     b=MarketStateVector.build("BTCUSDT",t,t,t,{"x":1},{"x":True},{},categorical={"trend":"bearish"})
     assert a.fingerprint!=b.fingerprint
+
+
+import asyncio
+import pytest
+from research_os.market.state_builder import MarketStateBuilder
+from research_os.features.models import FeatureSnapshot
+
+@pytest.mark.asyncio
+async def test_state_builder_async_offloads_build():
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    snapshot=FeatureSnapshot("BTCUSDT",t,())
+    state=await MarketStateBuilder().build_async("BTCUSDT",t,t,t,snapshot)
+    assert state.symbol=="BTCUSDT"
