@@ -52,7 +52,7 @@ class ReplayEngine:
 
     def run(self,symbol:str,candles:Sequence[ReplayCandle],dataset_version="replay-v1")->ReplayReport:
         rows=sorted(candles,key=lambda x:x.event_time)
-        results=[]; closes=[]; volumes=[]
+        results=[]; closes=[]; volumes=[]; highs=[]; lows=[]
         for i,c in enumerate(rows):
             pit=c.point_in_time_available_at or c.event_time
             # The decision is made when this candle becomes available, not at candle open.
@@ -60,11 +60,13 @@ class ReplayEngine:
             available=[x for x in rows[:i+1] if (x.point_in_time_available_at or x.event_time) <= pit]
             closes=[x.close for x in available]
             volumes=[x.volume for x in available]
+            highs=[x.high for x in available]
+            lows=[x.low for x in available]
             if len(closes)<6: continue
-            snap=self.features.build(symbol,c.event_time,closes,volumes)
+            snap=self.features.build(symbol,c.event_time,closes,volumes,highs,lows)
             state=self.builder.build(symbol,c.event_time,pit,pit,snap,{})
             analysis=self.analyzer.analyze(state); prob=self.probability.predict(analysis)
-            signal=self.signal_engine.build(analysis,prob,c.close,self._atr_proxy(rows[:i+1]))
+            signal=self.signal_engine.build(analysis,prob,c.close,next((f.value for f in snap.features if f.name == "atr_14" and f.available), None))
             if signal.direction is SignalDirection.NONE: continue
             status,outcome,ret=self._future_outcome(signal,rows,i)
             results.append(ReplayResult(c.event_time,signal,outcome,status,ret,dict(state.values)))
@@ -77,11 +79,6 @@ class ReplayEngine:
         return ReplayReport(symbol,dataset_version,(self.features.version,self.analyzer.version,self.probability.version,self.signal_engine.version),
             tuple(results),len(results),len(scored),wins,losses,expired,wins/(wins+losses) if wins+losses else None,
             CalibrationMetrics.brier(samples),CalibrationMetrics.log_loss(samples))
-
-    def _atr_proxy(self,rows):
-        if len(rows)<2:return None
-        recent=rows[-15:]
-        return sum(abs(x.close-y.close) for x,y in zip(recent[1:],recent[:-1]))/max(1,len(recent)-1)
 
     def _future_outcome(self,signal,rows,index):
         levels=signal.levels

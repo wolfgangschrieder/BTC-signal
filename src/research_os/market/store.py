@@ -17,7 +17,7 @@ class NormalizedMarketDataStore:
             update_id=int(p["update_id"]); sequence=p.get("sequence")
             if event.event_type is EventType.ORDERBOOK_SNAPSHOT:
                 bids=[{"price":str(x[0]),"size":str(x[1])} for x in p.get("bids",[])]; asks=[{"price":str(x[0]),"size":str(x[1])} for x in p.get("asks",[])]
-                session.add(OrderBookSnapshot(**common,update_id=update_id,sequence=sequence,bids=bids,asks=asks,valid=True))
+                session.add(OrderBookSnapshot(**common,update_id=update_id,sequence=sequence,bids=bids,asks=asks,valid=bool(p.get("valid", True))))
             else:
                 for side,key in (("buy","bids"),("sell","asks")):
                     for level in p.get(key,[]):

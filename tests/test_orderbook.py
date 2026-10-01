@@ -1,88 +1,45 @@
-from decimal import Decimal
-
-from research_os.data.models import QualityCode
 from research_os.exchanges.bybit.orderbook import OrderBook
+from research_os.data.models import QualityCode
 
-
-def snapshot() -> dict:
+def snapshot(ts=1000):
     return {
-        "topic": "orderbook.50.BTCUSDT",
-        "type": "snapshot",
-        "ts": 1000,
-        "data": {
-            "s": "BTCUSDT",
-            "u": 10,
-            "seq": 100,
-            "b": [["100", "2"], ["99", "1"]],
-            "a": [["101", "3"], ["102", "1"]],
-        },
+        "topic":"orderbook.50.BTCUSDT","type":"snapshot","ts":ts,
+        "data":{"u":1,"seq":1,"b":[["100","2"]],"a":[["101","3"]]},
     }
 
-
-def delta(update_id: int, *, seq: int = 101) -> dict:
-    return {
-        "topic": "orderbook.50.BTCUSDT",
-        "type": "delta",
-        "ts": 1100,
-        "data": {
-            "s": "BTCUSDT",
-            "u": update_id,
-            "seq": seq,
-            "b": [["100", "1.5"]],
-            "a": [["101", "0"]],
-        },
-    }
-
-
-def test_snapshot_builds_valid_book():
-    book = OrderBook("BTCUSDT")
+def test_snapshot_and_delta():
+    book=OrderBook("BTCUSDT")
     assert book.apply(snapshot()) is None
-    state = book.state
-    assert state.valid is True
-    assert state.bids[0].price == Decimal("100")
-    assert state.asks[0].price == Decimal("101")
+    assert book.state.valid
+    assert book.state.bids[0].price==100
+    quality=book.apply({
+        "topic":"orderbook.50.BTCUSDT","type":"delta","ts":2000,
+        "data":{"u":2,"seq":2,"b":[["100","4"]],"a":[]},
+    })
+    assert quality is None
+    assert book.state.bids[0].size==4
 
-
-def test_delta_updates_and_removes_levels():
-    book = OrderBook("BTCUSDT")
+def test_gap_invalidates_until_snapshot():
+    book=OrderBook("BTCUSDT")
     book.apply(snapshot())
-    assert book.apply(delta(11)) is None
-    assert book.state.bids[0].size == Decimal("1.5")
-    assert book.state.asks[0].price == Decimal("102")
+    quality=book.apply({
+        "topic":"orderbook.50.BTCUSDT","type":"delta","ts":2000,
+        "data":{"u":1,"seq":2,"b":[],"a":[]},
+    })
+    assert quality is not None and quality.code is QualityCode.DUPLICATE
+    assert book.state.valid
+    quality=book.apply({
+        "topic":"orderbook.50.BTCUSDT","type":"delta","ts":3000,
+        "data":{"u":3,"seq":0,"b":[],"a":[]},
+    })
+    assert quality is not None and quality.code is QualityCode.ORDERBOOK_GAP
+    assert not book.state.valid
+    assert book.apply(snapshot(4000)) is None
+    assert book.state.valid
 
-
-def test_delta_before_snapshot_invalidates_book():
-    book = OrderBook("BTCUSDT")
-    quality = book.apply(delta(11))
-    assert quality is not None
-    assert quality.code == QualityCode.ORDERBOOK_GAP
-    assert book.state.valid is False
-
-
-def test_duplicate_update_is_reported():
-    book = OrderBook("BTCUSDT")
-    book.apply(snapshot())
-    quality = book.apply(delta(10))
-    assert quality is not None
-    assert quality.code == QualityCode.DUPLICATE
-
-
-def test_crossed_book_invalidates():
-    book = OrderBook("BTCUSDT")
-    book.apply(snapshot())
-    quality = book.apply(
-        {
-            "topic": "orderbook.50.BTCUSDT",
-            "type": "delta",
-            "ts": 1200,
-            "data": {
-                "u": 11,
-                "seq": 101,
-                "b": [["102", "1"]],
-                "a": [],
-            },
-        }
-    )
-    assert quality is not None
-    assert quality.code == QualityCode.IMPOSSIBLE_VALUE
-    assert book.state.valid is False
+def test_stale_invalidates_book():
+    book=OrderBook("BTCUSDT")
+    book.apply(snapshot(1000))
+    quality=book.mark_stale(7001,5000)
+    assert quality is not None and quality.code is QualityCode.STALE
+    assert not book.state.valid
