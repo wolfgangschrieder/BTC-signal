@@ -54,11 +54,14 @@ class ReplayEngine:
         results=[]; closes=[]; volumes=[]
         for i,c in enumerate(rows):
             pit=c.point_in_time_available_at or c.event_time
-            if pit>c.event_time: raise ValueError("replay candle availability cannot be after decision timestamp")
-            closes.append(c.close); volumes.append(c.volume)
+            # The decision is made when this candle becomes available, not at candle open.
+            # This prevents confirmed-candle close data from leaking into an earlier decision.
+            available=[x for x in rows[:i+1] if (x.point_in_time_available_at or x.event_time) <= pit]
+            closes=[x.close for x in available]
+            volumes=[x.volume for x in available]
             if len(closes)<6: continue
             snap=self.features.build(symbol,c.event_time,closes,volumes)
-            state=self.builder.build(symbol,c.event_time,c.event_time,pit,snap,{})
+            state=self.builder.build(symbol,c.event_time,pit,pit,snap,{})
             analysis=self.analyzer.analyze(state); prob=self.probability.predict(analysis)
             signal=self.signal_engine.build(analysis,prob,c.close,self._atr_proxy(rows[:i+1]))
             if signal.direction is SignalDirection.NONE: continue
