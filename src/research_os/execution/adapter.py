@@ -19,6 +19,9 @@ class ExecutionAdapter:
     def submit(self, intent: OrderIntent) -> AdapterOrderResult:
         raise NotImplementedError
 
+    def get_order(self, client_order_id: str) -> "RemoteOrderState | None":
+        raise NotImplementedError
+
 class PaperExecutionAdapter(ExecutionAdapter):
     """Deterministic dry-run adapter; never contacts an exchange."""
     name="paper"
