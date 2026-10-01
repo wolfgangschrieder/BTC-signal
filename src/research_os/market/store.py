@@ -31,5 +31,9 @@ class NormalizedMarketDataStore:
                 session.add(FundingRate(**common,funding_rate=Decimal(str(p["funding_rate"])),funding_time=event.event_time))
             if p.get("open_interest") is not None:
                 session.add(OpenInterest(**common,open_interest=Decimal(str(p["open_interest"]))))
+        elif event.event_type is EventType.FUNDING:
+            session.add(FundingRate(**common, funding_rate=Decimal(str(p["funding_rate"])), funding_time=event.event_time))
+        elif event.event_type is EventType.OPEN_INTEREST:
+            session.add(OpenInterest(**common, open_interest=Decimal(str(p["open_interest"]))))
         elif event.event_type is EventType.LIQUIDATION:
             session.add(Liquidation(**common,side=str(p["side"]),price=Decimal(str(p["price"])),size=Decimal(str(p["size"]))))
