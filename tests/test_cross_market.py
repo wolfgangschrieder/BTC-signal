@@ -18,3 +18,23 @@ def test_cross_market_returns_require_previous_value():
     t=datetime(2026,1,1,tzinfo=timezone.utc)
     s=CrossMarketFeatureEngine().build(t,[CrossMarketObservation("DXY",t,t,101,"test")])
     assert returns(s,None)["DXY_return"] is None
+
+
+def test_cross_market_engine_adds_pit_safe_returns():
+    from datetime import datetime, timezone
+    from research_os.cross_market.models import CrossMarketObservation
+    from research_os.cross_market.engine import CrossMarketFeatureEngine
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    previous=CrossMarketFeatureEngine().build(t,[CrossMarketObservation("DXY",t,t,100,"test")])
+    current=CrossMarketFeatureEngine().build(t,[CrossMarketObservation("DXY",t,t,101,"test")],previous=previous)
+    assert round(current.values["DXY_return"],6)==0.01
+
+def test_cross_market_rejects_invalid_observation():
+    from datetime import datetime, timezone, timedelta
+    import pytest
+    from research_os.cross_market.models import CrossMarketObservation
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    with pytest.raises(ValueError):
+        CrossMarketObservation("DXY",t,t,float("inf"),"test")
+    with pytest.raises(ValueError):
+        CrossMarketObservation("DXY",t,t-timedelta(seconds=1),100,"test")
