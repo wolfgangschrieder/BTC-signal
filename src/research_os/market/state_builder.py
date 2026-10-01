@@ -3,63 +3,54 @@ from datetime import datetime
 from .state_vector import MarketStateVector
 from research_os.features.models import FeatureSnapshot
 
+def _split(values):
+    numeric={}; categorical={}
+    for key,value in values.items():
+        if isinstance(value,bool):
+            numeric[key]=float(value)
+        elif isinstance(value,(int,float)) or value is None:
+            numeric[key]=value
+        elif isinstance(value,str):
+            categorical[key]=value
+        else:
+            raise TypeError(f"unsupported MSV value type for {key}: {type(value).__name__}")
+    return numeric,categorical
+
 class MarketStateBuilder:
-    """Builds a reproducible MSV from features and explicit availability metadata."""
-    def build(self, symbol: str, timestamp: datetime, decision_time: datetime, pit: datetime, snapshot: FeatureSnapshot, data_quality: dict[str,str] | None = None, extra_values: dict[str, float | None] | None = None, extra_availability: dict[str, bool] | None = None) -> MarketStateVector:
+    def build(self,symbol,timestamp,decision_time,pit,snapshot,data_quality=None,extra_values=None,extra_availability=None):
         values={f.name:f.value for f in snapshot.features}
         availability={f.name:f.available for f in snapshot.features}
-        mtf_state=getattr(snapshot, "state", None)
+        mtf_state=getattr(snapshot,"state",None)
         if mtf_state is not None:
-            state=mtf_state
             values.update({
-                "mtf_trend": state.trend,
-                "mtf_momentum": state.momentum,
-                "mtf_volatility": state.volatility,
-                "mtf_structure": state.structure,
-                "mtf_breakout": state.breakout,
-                "mtf_pullback": state.pullback,
-                "mtf_alignment": state.alignment,
-                "mtf_conflict": float(state.conflict),
-                "mtf_strength": state.strength,
-            })
-            for key in ("mtf_trend","mtf_momentum","mtf_volatility","mtf_structure","mtf_breakout","mtf_pullback","mtf_alignment","mtf_conflict","mtf_strength"):
-                availability[key]=True
-        if extra_values:
-            values.update(extra_values)
-        if extra_availability:
-            availability.update(extra_availability)
-        quality=data_quality or {}
-        return MarketStateVector.build(symbol,timestamp,decision_time,pit,values,availability,quality,snapshot.version)
+                "mtf_trend":mtf_state.trend,"mtf_momentum":mtf_state.momentum,
+                "mtf_volatility":mtf_state.volatility,"mtf_structure":mtf_state.structure,
+                "mtf_breakout":mtf_state.breakout,"mtf_pullback":mtf_state.pullback,
+                "mtf_alignment":mtf_state.alignment,"mtf_conflict":float(mtf_state.conflict),
+                "mtf_strength":mtf_state.strength})
+            for k in ("mtf_trend","mtf_momentum","mtf_volatility","mtf_structure","mtf_breakout","mtf_pullback","mtf_alignment","mtf_conflict","mtf_strength"):
+                availability[k]=True
+        if extra_values: values.update(extra_values)
+        if extra_availability: availability.update(extra_availability)
+        numeric,categorical=_split(values)
+        return MarketStateVector.build(symbol,timestamp,decision_time,pit,numeric,availability,data_quality or {},snapshot.version,categorical=categorical)
 
-
-    def build_multi(self, symbol: str, timestamp: datetime, decision_time: datetime, pit: datetime, snapshot, base_snapshot: FeatureSnapshot | None = None, data_quality: dict[str,str] | None = None, extra_values: dict[str, float | None] | None = None, extra_availability: dict[str, bool] | None = None) -> MarketStateVector:
-        """Build one unified MSV with namespaced multi-timeframe features."""
-        availability={}
-        values={}
+    def build_multi(self,symbol,timestamp,decision_time,pit,snapshot,base_snapshot=None,data_quality=None,extra_values=None,extra_availability=None):
+        values={}; availability={}
         if base_snapshot is not None:
-            for feature in base_snapshot.features:
-                values[feature.name]=feature.value
-                availability[feature.name]=feature.available
-        for timeframe, feature_snapshot in snapshot.snapshots.items():
+            for f in base_snapshot.features:
+                values[f.name]=f.value; availability[f.name]=f.available
+        for timeframe,fs in snapshot.snapshots.items():
             prefix=timeframe.value
-            for feature in feature_snapshot.features:
-                key=f"tf_{prefix}_{feature.name}"
-                values[key]=feature.value
-                availability[key]=feature.available
+            for f in fs.features:
+                values[f"tf_{prefix}_{f.name}"]=f.value
+                availability[f"tf_{prefix}_{f.name}"]=f.available
         if snapshot.state is not None:
-            state=snapshot.state
-            values.update({
-                "mtf_trend": state.trend,
-                "mtf_momentum": state.momentum,
-                "mtf_volatility": state.volatility,
-                "mtf_structure": state.structure,
-                "mtf_breakout": state.breakout,
-                "mtf_pullback": state.pullback,
-                "mtf_alignment": state.alignment,
-                "mtf_conflict": float(state.conflict),
-                "mtf_strength": state.strength,
-            })
-            for key in ("mtf_trend","mtf_momentum","mtf_volatility","mtf_structure","mtf_breakout","mtf_pullback","mtf_alignment","mtf_conflict","mtf_strength"):
-                availability[key]=True
-        quality=data_quality or {}
-        return MarketStateVector.build(symbol,timestamp,decision_time,pit,values,availability,quality,snapshot.version)
+            s=snapshot.state
+            values.update({"mtf_trend":s.trend,"mtf_momentum":s.momentum,"mtf_volatility":s.volatility,"mtf_structure":s.structure,"mtf_breakout":s.breakout,"mtf_pullback":s.pullback,"mtf_alignment":s.alignment,"mtf_conflict":float(s.conflict),"mtf_strength":s.strength})
+            for k in ("mtf_trend","mtf_momentum","mtf_volatility","mtf_structure","mtf_breakout","mtf_pullback","mtf_alignment","mtf_conflict","mtf_strength"):
+                availability[k]=True
+        if extra_values: values.update(extra_values)
+        if extra_availability: availability.update(extra_availability)
+        numeric,categorical=_split(values)
+        return MarketStateVector.build(symbol,timestamp,decision_time,pit,numeric,availability,data_quality or {},snapshot.version,categorical=categorical)
