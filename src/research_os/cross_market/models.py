@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 
 @dataclass(frozen=True)
 class CrossMarketObservation:
@@ -15,7 +16,7 @@ class CrossMarketObservation:
     def __post_init__(self):
         if not self.asset.strip():
             raise ValueError("asset is required")
-        if self.value != self.value:
+        if not isfinite(self.value):
             raise ValueError("value must be finite")
         if self.point_in_time_available_at < self.timestamp:
             raise ValueError("PIT availability cannot precede event time")
