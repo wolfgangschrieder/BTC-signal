@@ -12,4 +12,6 @@ def test_latency_timer_and_report():
         pass
     report=t.report()
     assert report["ws_normalization"]["count"]==1
+    assert report["ws_normalization"]["min_ms"] is not None
     assert report["ws_normalization"]["p99_ms"] is not None
+    assert report["ws_normalization"]["max_ms"] is not None
