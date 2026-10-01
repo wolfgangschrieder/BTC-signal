@@ -35,21 +35,30 @@ def replay(symbol,start,end):
     print({"symbol":report.symbol,"dataset_version":report.dataset_version,"signals":report.signals,"resolved":report.resolved,"wins":report.wins,"losses":report.losses,"expired":report.expired,"win_rate":report.win_rate,"brier":report.brier,"log_loss":report.log_loss})
     return 0
 
-def state():
-    from research_os.market.state import MarketStateVector
-    from research_os.market.state_vector import MarketStateVector as CanonicalStateVector
-    print({"state_models": ["market.MarketStateVector", "market.state_vector.MarketStateVector"], "status": "available"})
+def state(symbol=None, history=False, timestamp=None, compare=None):
+    from research_os.market.state_vector import MarketStateVector
+    if timestamp:
+        target = datetime.fromisoformat(timestamp)
+        print({"symbol": symbol or "BTCUSDT", "timestamp": target.isoformat(), "status": "lookup_requires_persisted_provider"})
+        return 0
+    if compare:
+        print({"compare": compare, "status": "comparison_requires_persisted_provider"})
+        return 0
+    if history:
+        print({"symbol": symbol or "BTCUSDT", "history": [], "status": "no state repository configured"})
+        return 0
+    print({"symbol": symbol or "BTCUSDT", "status": "state provider requires live/persisted data"})
     return 0
 
 def main():
     parser=argparse.ArgumentParser(prog="research-os"); sub=parser.add_subparsers(dest="command",required=True)
-    sub.add_parser("health"); sub.add_parser("live"); sub.add_parser("state")
+    sub.add_parser("health"); sub.add_parser("live"); st=sub.add_parser("state"); st.add_argument("--symbol",default="BTCUSDT"); st.add_argument("--history",action="store_true"); st.add_argument("--timestamp"); st.add_argument("--compare")
     rp=sub.add_parser("replay"); rp.add_argument("--symbol",default="BTCUSDT"); rp.add_argument("--start",required=True); rp.add_argument("--end",required=True)
     cp=sub.add_parser("calibration"); cp.add_argument("--symbol",default=None); cp.add_argument("--start",default=None); cp.add_argument("--end",default=None)
     rg=sub.add_parser("regime"); rg.add_argument("--symbol",default="BTCUSDT"); rg.add_argument("--start",required=True); rg.add_argument("--end",required=True)
     args=parser.parse_args()
     if args.command=="health": raise SystemExit(health())
-    if args.command=="state": raise SystemExit(state())
+    if args.command=="state": raise SystemExit(state(args.symbol,args.history,args.timestamp,args.compare))
     if args.command=="live":
         from research_os.pipeline.runtime import main as live_main
         live_main()
