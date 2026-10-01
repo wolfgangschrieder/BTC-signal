@@ -33,7 +33,7 @@ class LiveSignalService:
 
     ORDERBOOK_STALE_MS=5000
 
-    def __init__(self,symbol="BTCUSDT",interval="1",publisher:EventPublisher|None=None,telegram:TelegramClient|None=None,config=None):
+    def __init__(self,symbol="BTCUSDT",interval="1",publisher:EventPublisher|None=None,telegram:TelegramClient|None=None,config=None,guard:SignalGuard|None=None):
         self.symbol=symbol; self.interval=interval; self.publisher=publisher
         self.telegram=telegram
         self.closes=deque(maxlen=2000); self.highs=deque(maxlen=2000); self.lows=deque(maxlen=2000); self.bars_1m=deque(maxlen=2000); self.trades=deque(maxlen=5000)
@@ -47,7 +47,7 @@ class LiveSignalService:
         self._last_orderbook_update=datetime.min.replace(tzinfo=timezone.utc)
         self._recovery_lock=asyncio.Lock()
         self.features=FeatureEngine(); self.builder=MarketStateBuilder()
-        self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(),TelegramFormatter(),SignalGuard())
+        self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(),TelegramFormatter(),guard or SignalGuard())
         self.outcomes=SignalOutcomeRepository(); self.states=MarketStateRepository()
         self.websocket=BybitWebSocket(
             [f"kline.{interval}.{symbol}",f"tickers.{symbol}",f"orderbook.50.{symbol}",f"publicTrade.{symbol}",f"allLiquidation.{symbol}"],
