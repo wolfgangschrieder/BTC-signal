@@ -24,7 +24,14 @@ class LatencyHistogram:
         index=min(len(xs)-1, int(round(q*(len(xs)-1))))
         return xs[index]
     def summary(self) -> dict[str,float|int|None]:
-        return {"count":len(self.samples_ms),"p50_ms":self.percentile(.50),"p95_ms":self.percentile(.95),"p99_ms":self.percentile(.99)}
+        return {
+            "count": len(self.samples_ms),
+            "min_ms": min(self.samples_ms),
+            "p50_ms": self.percentile(.50),
+            "p95_ms": self.percentile(.95),
+            "p99_ms": self.percentile(.99),
+            "max_ms": max(self.samples_ms),
+        }
 
 @dataclass
 class LatencyTelemetry:
