@@ -123,7 +123,7 @@ class LiveSignalService:
                         "derivatives_funding_negative": 1.0 if extra_state.funding_regime == "negative_funding" else 0.0,
                         "derivatives_oi_rising": 1.0 if extra_state.oi_regime == "rising" else 0.0,
                         "derivatives_oi_falling": 1.0 if extra_state.oi_regime == "falling" else 0.0,
-                        "derivatives_liquidation_stress": 1.0 if extra_state.liquidation_stress == "high" else 0.0,
+                        "derivatives_liquidation_stress": 1.0 if extra_state.liquidation_stress == "observed" else 0.0,
                     }
                 else:
                     extra={**flow_values,**deriv_values}
