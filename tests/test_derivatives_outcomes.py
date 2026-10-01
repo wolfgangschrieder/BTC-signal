@@ -19,7 +19,7 @@ def test_derivatives_outcome_is_deterministic():
         Candle(t+timedelta(minutes=1),100,103,98,102),
         Candle(t+timedelta(minutes=2),102,104,101,103),
     ]
-    o=compute_outcome(state,t,candles,2,100,110)
+    o=compute_outcome(state,t,candles,2,100,100,110)
     assert o is not None
     assert round(o.return_pct,6)==0.03
     assert round(o.mfe_pct,6)==0.04
@@ -30,4 +30,4 @@ def test_derivatives_outcome_requires_complete_window():
     t=datetime(2026,1,1,tzinfo=timezone.utc)
     state=DerivativesState("unknown","unknown","unknown","unknown","unknown","unknown","unknown",0,False)
     candles=[Candle(t,100,101,99,100)]
-    assert compute_outcome(state,t,candles,5) is None
+    assert compute_outcome(state,t,candles,5,100) is None
