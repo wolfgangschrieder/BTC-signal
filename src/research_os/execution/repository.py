@@ -58,3 +58,22 @@ class ExecutionRepository:
                     "cancelled_at": confirmation.created_at if confirmation.status.value == "cancelled" else None,
                 },
             )
+
+    def get_order(self, client_order_id: str):
+        with self.engine.begin() as conn:
+            row=conn.execute(
+                text("SELECT * FROM execution.orders WHERE client_order_id=:client_order_id"),
+                {"client_order_id": client_order_id},
+            ).mappings().first()
+        return dict(row) if row else None
+
+    def list_events(self, client_order_id: str):
+        with self.engine.begin() as conn:
+            rows=conn.execute(
+                text(
+                    "SELECT * FROM execution.events "
+                    "WHERE client_order_id=:client_order_id ORDER BY event_time, id"
+                ),
+                {"client_order_id": client_order_id},
+            ).mappings().all()
+        return [dict(row) for row in rows]
