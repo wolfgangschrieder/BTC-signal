@@ -22,6 +22,6 @@ def test_pipeline_does_not_emit_no_signal():
     t=datetime(2026,1,1,tzinfo=timezone.utc)
     f=FeatureEngine().build("BTCUSDT",t,[100,101,102,103,104,105])
     state=MarketStateBuilder().build("BTCUSDT",t,t,t,f,{})
-    pipe=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(),TelegramFormatter(),SignalGuard())
+    pipe=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(min_probability=.30),TelegramFormatter(),SignalGuard())
     signal,msg=pipe.evaluate(state,105,2)
     assert signal.direction is SignalDirection.LONG and msg is not None

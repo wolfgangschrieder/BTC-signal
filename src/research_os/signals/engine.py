@@ -2,7 +2,8 @@ from __future__ import annotations
 from research_os.intelligence.models import AnalysisResult, EvidenceDirection
 from research_os.intelligence.probability import ProbabilityResult
 from research_os.signals.models import SignalDirection, SignalLevels, SignalResult
-from research_os.signals.risk import RiskEngine
+from research_os.signals.risk import RiskEngine, LiquidityLevel
+from research_os.features.liquidity import LiquidityCluster
 
 class SignalEngine:
     version="signal-v1"
@@ -12,7 +13,7 @@ class SignalEngine:
         self.min_probability=min_probability
         self.min_rr=min_rr
 
-    def build(self, analysis: AnalysisResult, probability: ProbabilityResult, price: float, atr: float | None = None) -> SignalResult:
+    def build(self, analysis: AnalysisResult, probability: ProbabilityResult, price: float, atr: float | None = None, liquidity_levels: tuple[LiquidityLevel,...] = (), liquidity_clusters: tuple[LiquidityCluster,...] = ()) -> SignalResult:
         if price <= 0:
             raise ValueError("price must be positive")
 
@@ -41,15 +42,9 @@ class SignalEngine:
                 self.version,
             )
 
-        risk_distance=atr
-        if direction is SignalDirection.LONG:
-            entry_min,entry_max=price-0.15*atr,price+0.15*atr
-            stop=price-risk_distance
-            t1,t2,t3=price+1.5*atr,price+2.5*atr,price+3.5*atr
-        else:
-            entry_min,entry_max=price-0.15*atr,price+0.15*atr
-            stop=price+risk_distance
-            t1,t2,t3=price-1.5*atr,price-2.5*atr,price-3.5*atr
+        entry_min,entry_max=price-0.15*atr,price+0.15*atr
+        levels=self.risk.build_levels(direction.value,price,atr,liquidity_levels,liquidity_clusters)
+        stop,t1,t2,t3=levels.stop_loss,levels.tp1,levels.tp2,levels.tp3
 
         risk=abs(price-stop)
         rr1=abs(t1-price)/risk
@@ -70,6 +65,6 @@ class SignalEngine:
             SignalLevels(entry_min,entry_max,stop,t1,t2,t3,rr1,rr2,rr3),
             ev,lev,
             tuple(e.reason for e in analysis.evidence if e.direction.value == direction.value and e.reason),
-            ("volatility expansion can invalidate levels","market structure may change before entry"),
+            (f"stop source: {levels.stop_source}","market structure may change before entry"),
             self.version,
         )

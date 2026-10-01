@@ -104,7 +104,7 @@ class MultiTimeframeFeatureEngine:
         """Build only from bars whose complete availability time is <= as_of."""
         cutoff=as_of or timestamp
         ordered=sorted(bars_1m,key=lambda x:x.timestamp)
-        available=[bar for bar in ordered if bar.timestamp.astimezone(timezone.utc)+timedelta(minutes=1) <= cutoff.astimezone(timezone.utc)]
+        available=[bar for bar in ordered if bar.timestamp.astimezone(timezone.utc) <= timestamp.astimezone(timezone.utc) and bar.timestamp.astimezone(timezone.utc)+timedelta(minutes=1) <= cutoff.astimezone(timezone.utc)]
         snapshots={}
         for timeframe in Timeframe:
             bars=aggregate_bars(available,timeframe)
