@@ -73,7 +73,7 @@ class LiveSignalService:
         self.outcomes=SignalOutcomeRepository(); self.states=MarketStateRepository()
         self.websocket=BybitWebSocket(
             [f"kline.{interval}.{symbol}",f"tickers.{symbol}",f"orderbook.50.{symbol}",f"publicTrade.{symbol}",f"allLiquidation.{symbol}"],
-            self._handle,config or BybitWebSocketConfig()
+            self._handle,config or BybitWebSocketConfig(),latency=self.latency
         )
 
     async def _handle(self,message):
