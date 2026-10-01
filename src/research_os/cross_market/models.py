@@ -32,4 +32,5 @@ class CrossMarketSnapshot:
     sources: dict[str,str]
     synchronized: bool = True
     max_event_time_skew_seconds: float = 0.0
+    max_source_latency_skew_seconds: float = 0.0
     version: str="cross-market-v3"
