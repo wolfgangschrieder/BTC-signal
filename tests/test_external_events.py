@@ -27,9 +27,9 @@ def event(event_id="e1", *, event_time=None, available_at=None, sentiment=0.5):
     )
 
 
-def test_external_event_rejects_future_pit():
-    e = event(available_at=datetime(2026, 1, 1, 11, 59, tzinfo=timezone.utc))
-    assert e.point_in_time_available_at < e.event_time
+def test_external_event_rejects_pit_before_event():
+    with pytest.raises(ValueError):
+        event(available_at=datetime(2026, 1, 1, 11, 59, tzinfo=timezone.utc))
 
 
 def test_engine_excludes_events_not_yet_available():
