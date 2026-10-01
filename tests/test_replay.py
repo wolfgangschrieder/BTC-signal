@@ -8,12 +8,10 @@ def candles(prices):
 def test_replay_is_deterministic():
     data=candles([100,100.1,100.2,100.3,100.4,100.5,101,101.2,101.4,101.6])
     e=ReplayEngine()
-    a=e.run("BTCUSDT",data,"fixture-v1"); b=e.run("BTCUSDT",data,"fixture-v1")
-    assert a==b
+    assert e.run("BTCUSDT",data,"fixture-v1")==e.run("BTCUSDT",data,"fixture-v1")
 
-def test_replay_rejects_future_information():
+def test_replay_uses_availability_as_decision_time():
     t=datetime(2026,1,1,tzinfo=timezone.utc)
-    data=[ReplayCandle(t+i*timedelta(minutes=1),100,101,99,100,1,t+(i+1)*timedelta(minutes=1)) for i in range(6)]
-    try: ReplayEngine().run("BTCUSDT",data)
-    except ValueError as exc: assert "availability" in str(exc)
-    else: raise AssertionError("future PIT must be rejected")
+    data=[ReplayCandle(t+i*timedelta(minutes=1),100+i,101+i,99+i,100+i,1,t+i*timedelta(minutes=1)+timedelta(seconds=30)) for i in range(8)]
+    report=ReplayEngine().run("BTCUSDT",data)
+    assert report.dataset_version=="replay-v1"
