@@ -28,38 +28,31 @@ class OrderFlowSnapshot:
     version: str = "orderflow-v1"
 
 class OrderFlowEngine:
-    """Deterministic trade-flow features. Invalid observations remain excluded."""
     version = "orderflow-v1"
 
-    def build(
-        self,
-        trades: Sequence[TradeObservation],
-        timestamp: datetime,
-        lookback: int = 200,
-        large_trade_quantile: float = 0.90,
-    ) -> OrderFlowSnapshot:
-        valid=[]
-        for trade in trades[-lookback:]:
-            side=trade.side.lower()
-            if trade.price <= 0 or trade.size <= 0 or side not in {"buy","sell"}:
-                continue
-            valid.append(trade)
+    def build(self, trades: Sequence[TradeObservation], timestamp: datetime, lookback: int = 200, cumulative_delta_base: float = 0.0, large_trade_quantile: float = 0.90) -> OrderFlowSnapshot:
+        valid=[t for t in trades[-lookback:] if t.price>0 and t.size>0 and t.side.lower() in {"buy","sell"}]
         if not valid:
-            return OrderFlowSnapshot(timestamp,None,None,None,None,0,None,None,None,None,False,"no valid trades")
-
+            return OrderFlowSnapshot(timestamp,None,None,None,cumulative_delta_base,0,None,None,None,None,False,"no valid trades")
         buy=sum(t.size for t in valid if t.side.lower()=="buy")
         sell=sum(t.size for t in valid if t.side.lower()=="sell")
-        total=buy+sell
-        delta=buy-sell
+        total=buy+sell; delta=buy-sell
         sizes=sorted(t.size for t in valid)
         index=min(len(sizes)-1,max(0,int(round((len(sizes)-1)*large_trade_quantile))))
         threshold=sizes[index]
         large=sum(t.size for t in valid if t.size>=threshold)
-        first=valid[0].timestamp
-        last=valid[-1].timestamp
-        span=max((last-first).total_seconds(),1.0)
-        return OrderFlowSnapshot(
-            timestamp,buy,sell,delta,delta,len(valid),len(valid)/span,
-            large,large/total if total else None,
-            delta/total if total else None,True
-        )
+        span=max((valid[-1].timestamp-valid[0].timestamp).total_seconds(),1.0)
+        return OrderFlowSnapshot(timestamp,buy,sell,delta,cumulative_delta_base+delta,len(valid),len(valid)/span,large,large/total if total else None,delta/total if total else None,True)
+
+def snapshot_features(snapshot: OrderFlowSnapshot) -> dict[str,float|None]:
+    return {
+        "orderflow_buy_volume": snapshot.buy_volume,
+        "orderflow_sell_volume": snapshot.sell_volume,
+        "orderflow_delta": snapshot.delta,
+        "orderflow_cumulative_delta": snapshot.cumulative_delta,
+        "orderflow_trade_count": float(snapshot.trade_count) if snapshot.available else None,
+        "orderflow_intensity": snapshot.intensity,
+        "orderflow_large_trade_volume": snapshot.large_trade_volume,
+        "orderflow_large_trade_share": snapshot.large_trade_share,
+        "orderflow_imbalance": snapshot.imbalance,
+    }
