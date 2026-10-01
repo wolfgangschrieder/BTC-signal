@@ -32,6 +32,16 @@ class LeadLagResult:
     correlation: float | None
     observations: int
 
+@dataclass(frozen=True, slots=True)
+class CrossExchangeOFIAggregate:
+    value: float | None
+    exchanges: tuple[str, ...]
+    coverage: int
+    dispersion: float | None
+    available: bool
+
+SUPPORTED_OFI_EXCHANGES = ("binance", "bybit", "coinbase")
+
 def order_flow_imbalance(previous: ExchangeOrderBook | None, current: ExchangeOrderBook, levels: int = 5) -> float | None:
     if levels <= 0:
         raise ValueError("levels must be positive")
@@ -78,8 +88,43 @@ class RollingOFIZScore:
             self._history.pop(0)
         return z
 
+def normalize_multi_exchange_ofi(
+    observations: Sequence[OFIObservation],
+    normalizers: dict[str, RollingOFIZScore],
+) -> tuple[OFIObservation, ...]:
+    """Normalize each exchange independently before cross-exchange comparison."""
+    result = []
+    for item in observations:
+        normalizer = normalizers.get(item.exchange)
+        normalized = normalizer.transform(item.raw_ofi) if normalizer is not None else None
+        result.append(
+            OFIObservation(
+                item.exchange,
+                item.timestamp_ms,
+                item.raw_ofi,
+                normalized,
+                item.levels,
+            )
+        )
+    return tuple(result)
+
 def normalized_multi_exchange_ofi(observations: Sequence[OFIObservation]) -> dict[str, float]:
     return {item.exchange: item.normalized_ofi for item in observations if item.normalized_ofi is not None}
+
+def aggregate_normalized_multi_exchange_ofi(
+    observations: Sequence[OFIObservation],
+    min_exchanges: int = 2,
+) -> CrossExchangeOFIAggregate:
+    if min_exchanges < 1:
+        raise ValueError("min_exchanges must be positive")
+    normalized = normalized_multi_exchange_ofi(observations)
+    exchanges = tuple(sorted(normalized))
+    if len(exchanges) < min_exchanges:
+        return CrossExchangeOFIAggregate(None, exchanges, len(exchanges), None, False)
+    values = [normalized[exchange] for exchange in exchanges]
+    mean_value = mean(values)
+    dispersion = mean((value - mean_value) ** 2 for value in values) ** 0.5
+    return CrossExchangeOFIAggregate(mean_value, exchanges, len(exchanges), dispersion, True)
 
 def pearson_lead_lag(leader_values: Sequence[float], follower_values: Sequence[float], lag_steps: int) -> float | None:
     if lag_steps < 0:
