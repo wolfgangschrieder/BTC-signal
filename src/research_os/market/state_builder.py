@@ -41,5 +41,20 @@ class MarketStateBuilder:
                 key=f"tf_{prefix}_{feature.name}"
                 values[key]=feature.value
                 availability[key]=feature.available
+        if snapshot.state is not None:
+            state=snapshot.state
+            values.update({
+                "mtf_trend": state.trend,
+                "mtf_momentum": state.momentum,
+                "mtf_volatility": state.volatility,
+                "mtf_structure": state.structure,
+                "mtf_breakout": state.breakout,
+                "mtf_pullback": state.pullback,
+                "mtf_alignment": state.alignment,
+                "mtf_conflict": float(state.conflict),
+                "mtf_strength": state.strength,
+            })
+            for key in ("mtf_trend","mtf_momentum","mtf_volatility","mtf_structure","mtf_breakout","mtf_pullback","mtf_alignment","mtf_conflict","mtf_strength"):
+                availability[key]=True
         quality=data_quality or {}
         return MarketStateVector.build(symbol,timestamp,decision_time,pit,values,availability,quality,snapshot.version)
