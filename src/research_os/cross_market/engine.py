@@ -5,11 +5,11 @@ from .state import classify
 class CrossMarketFeatureEngine:
     version="cross-market-v1"
 
-    def build(self, timestamp, observations, as_of=None):
+    def build(self,timestamp,observations,as_of=None):
         cutoff=as_of or timestamp
         latest={}
         for obs in observations:
-            if not obs.is_pit_valid(cutoff) or obs.timestamp > timestamp:
+            if obs.point_in_time_available_at > cutoff or obs.timestamp > timestamp:
                 continue
             current=latest.get(obs.asset)
             if current is None or obs.timestamp > current.timestamp:
@@ -19,10 +19,12 @@ class CrossMarketFeatureEngine:
             values[asset]=obs.value
             availability[asset]=True
             sources[asset]=obs.source
-        snapshot=CrossMarketSnapshot(timestamp,values,availability,sources,self.version)
-        return snapshot
+        return CrossMarketSnapshot(timestamp,values,availability,sources,self.version)
 
-def returns(snapshot, previous):
+    def state(self,snapshot):
+        return classify(snapshot)
+
+def returns(snapshot,previous):
     out={}
     for asset,value in snapshot.values.items():
         prev=previous.values.get(asset) if previous else None
