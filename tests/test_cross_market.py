@@ -61,3 +61,14 @@ def test_cross_market_rejects_source_latency_skew():
     snapshot=CrossMarketFeatureEngine().build(t,observations,as_of=t+timedelta(seconds=61),max_source_latency_skew_seconds=30)
     assert not snapshot.synchronized
     assert snapshot.max_source_latency_skew_seconds == 60
+
+
+def test_cross_market_snapshot_selection_is_deterministic_for_same_event_time():
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    observations=[
+        CrossMarketObservation("SPX",t,t+timedelta(seconds=10),5000,"source-b"),
+        CrossMarketObservation("SPX",t,t+timedelta(seconds=5),4990,"source-a"),
+    ]
+    snapshot=CrossMarketFeatureEngine().build(t,observations,as_of=t+timedelta(seconds=10))
+    assert snapshot.values["SPX"]==5000
+    assert snapshot.sources["SPX"]=="source-b"
