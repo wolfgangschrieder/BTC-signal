@@ -25,7 +25,7 @@ def upgrade():
         else: cols += [sa.Column("side",sa.String(16),nullable=False),sa.Column("price",sa.Numeric(38,18),nullable=False),sa.Column("size",sa.Numeric(38,18),nullable=False)]
         op.create_table(name,*cols,schema="derivatives")
     for schema,name in [("market","trades"),("market","orderbook_updates"),("market","orderbook_snapshots"),("market","market_snapshots"),("market","candles"),("derivatives","funding_rates"),("derivatives","open_interest"),("derivatives","liquidations")]:
-        if name!="candles": _hypertable(schema,name)
+        _hypertable(schema,name)
     for schema,name in [("market","trades"),("market","orderbook_updates"),("market","orderbook_snapshots"),("market","market_snapshots"),("market","candles"),("derivatives","funding_rates"),("derivatives","open_interest"),("derivatives","liquidations")]:
         op.create_index(f"ix_{schema}_{name}_symbol_event_time","{name}",["symbol","event_time"],schema=schema)
     for table in ("trades","orderbook_updates","orderbook_snapshots","market_snapshots"):
