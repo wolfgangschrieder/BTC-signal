@@ -35,3 +35,5 @@ jobs:
       - run: alembic heads
       - run: alembic upgrade head
       - run: pytest -q
+      - name: Hot-path benchmark smoke
+        run: python tests/benchmark_hot_path.py --iterations 200 --warmup 50
