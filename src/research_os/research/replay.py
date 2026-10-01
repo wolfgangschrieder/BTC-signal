@@ -26,6 +26,7 @@ class ReplayResult:
     outcome: int|None
     outcome_status: str
     return_pct: float|None
+    features: dict[str,float|None]
 
 @dataclass(frozen=True)
 class ReplayReport:
@@ -66,7 +67,7 @@ class ReplayEngine:
             signal=self.signal_engine.build(analysis,prob,c.close,self._atr_proxy(rows[:i+1]))
             if signal.direction is SignalDirection.NONE: continue
             status,outcome,ret=self._future_outcome(signal,rows,i)
-            results.append(ReplayResult(c.event_time,signal,outcome,status,ret))
+            results.append(ReplayResult(c.event_time,signal,outcome,status,ret,dict(state.values)))
         resolved=[x for x in results if x.outcome is not None]
         wins=sum(x.outcome==1 for x in resolved if x.outcome_status=="win")
         losses=sum(x.outcome==0 for x in resolved if x.outcome_status=="loss")
