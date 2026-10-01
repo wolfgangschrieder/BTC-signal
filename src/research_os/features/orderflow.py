@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from collections.abc import Sequence
+import asyncio
 
 @dataclass(frozen=True)
 class TradeObservation:
@@ -31,6 +32,10 @@ class OrderFlowSnapshot:
 
 class OrderFlowEngine:
     version = "orderflow-v2"
+
+    async def build_async(self, trades, timestamp, **kwargs):
+        """Offload unusually expensive research windows from the asyncio event loop."""
+        return await asyncio.to_thread(self.build, trades, timestamp, **kwargs)
 
     def build(
         self,
