@@ -10,6 +10,7 @@ from research_os.research.cross_market_outcomes import CrossMarketOutcome, compu
 class CrossMarketDatasetRow:
     timestamp: datetime
     asset: str
+    horizon_minutes: int
     value: float | None
     zscore: float | None
     percentile: float | None
@@ -46,7 +47,7 @@ class CrossMarketDatasetBuilder:
                         skipped+=1
                         continue
                     rows.append(CrossMarketDatasetRow(
-                        timestamp,asset,norm.value,norm.zscore,norm.percentile,
+                        timestamp,asset,horizon,norm.value,norm.zscore,norm.percentile,
                         norm.available,norm.sample_size,outcome.btc_return_pct,
                         outcome.btc_mfe_pct,outcome.btc_mae_pct))
         return CrossMarketDataset(symbol,f"cross-market-dataset-v2:{min_samples}:{window_size}:{','.join(map(str,horizons))}",tuple(rows),skipped)
