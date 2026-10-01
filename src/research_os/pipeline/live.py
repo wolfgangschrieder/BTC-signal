@@ -34,7 +34,7 @@ class LiveSignalService:
         self.symbol=symbol; self.interval=interval; self.publisher=publisher
         self.telegram=telegram
         self.closes=deque(maxlen=2000); self.highs=deque(maxlen=2000); self.lows=deque(maxlen=2000); self.bars_1m=deque(maxlen=2000); self.trades=deque(maxlen=5000)
-        self.orderflow=OrderFlowEngine(); self.cumulative_delta=0.0
+        self.orderflow=OrderFlowEngine(); self.cumulative_delta=0.0; self.previous_flow_price=None; self.previous_flow_cvd=0.0
         self.mtf=MultiTimeframeFeatureEngine()
         self._last_candle_start=None
         self.orderbook=OrderBook(symbol,max_levels=50)
@@ -55,8 +55,11 @@ class LiveSignalService:
             if topic.startswith("publicTrade."):
                 event=BybitNormalizer.trade(message); p=event.payload
                 self.trades.append(TradeObservation(event.event_time(),float(p["price"]),float(p["size"]),str(p["side"])))
-                flow=self.orderflow.build(list(self.trades),event.event_time(),cumulative_delta_base=self.cumulative_delta)
-                if flow.available: self.cumulative_delta=flow.cumulative_delta or self.cumulative_delta
+                flow=self.orderflow.build(list(self.trades),event.event_time,cumulative_delta_base=self.cumulative_delta,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
+                if flow.available:
+                    self.cumulative_delta=flow.cumulative_delta or self.cumulative_delta
+                    self.previous_flow_price=float(p["price"])
+                    self.previous_flow_cvd=self.cumulative_delta
                 if self.publisher: await self.publisher(event)
                 return
             if topic.startswith("kline."):
@@ -91,7 +94,7 @@ class LiveSignalService:
                 )
                 mtf_snapshot=self.mtf.build(self.symbol,list(self.bars_1m),event.event_time,as_of=now)
                 state=self.builder.build_multi(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap)
-                flow=self.orderflow.build(list(self.trades),event.event_time,cumulative_delta_base=self.cumulative_delta)
+                flow=self.orderflow.build(list(self.trades),event.event_time,cumulative_delta_base=self.cumulative_delta,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
                 flow_values=snapshot_features(flow)
                 state.values.update(flow_values)
                 state.availability.update({key: flow.available and value is not None for key,value in flow_values.items()})
