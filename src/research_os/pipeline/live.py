@@ -12,6 +12,8 @@ from research_os.market.state_builder import MarketStateBuilder
 from research_os.features.engine import FeatureEngine
 from research_os.features.orderflow import OrderFlowEngine, TradeObservation, snapshot_features
 from research_os.features.derivatives import DerivativesEngine, snapshot_features as derivatives_features
+from research_os.features.liquidity import LiquidityEngine
+from research_os.signals.guard import SignalExecutionContext
 from research_os.intelligence.analyzer import MarketAnalyzer
 from research_os.intelligence.probability import ProbabilityEngine
 from research_os.notifications.telegram import TelegramFormatter
@@ -38,6 +40,7 @@ class LiveSignalService:
         self.orderflow=OrderFlowEngine(); self.cumulative_delta=0.0; self.previous_flow_price=None; self.previous_flow_cvd=0.0
         self.derivatives=DerivativesEngine(); self.derivatives_funding=None; self.derivatives_oi=None; self.previous_derivatives_price=None; self.previous_funding=None; self.previous_oi=None; self.liquidations=deque(maxlen=5000)
         self.mtf=MultiTimeframeFeatureEngine()
+        self.liquidity=LiquidityEngine()
         self._last_candle_start=None
         self.orderbook=OrderBook(symbol,max_levels=50)
         self.rest=BybitRestClient()
@@ -137,7 +140,20 @@ class LiveSignalService:
                     with SessionLocal() as session:
                         self.states.save(session,state); session.commit()
                 await asyncio.to_thread(save_state)
-                signal,msg=self.pipeline.evaluate(state,float(event.payload["close"]),self._atr_from_features(snap))
+                price=float(event.payload["close"])
+                liquidity_state=self.liquidity.build(self.orderbook.state,price)
+                spread_bps=None
+                book_state=self.orderbook.state
+                if book_state.valid and book_state.bids and book_state.asks:
+                    bid=float(book_state.bids[0].price); ask=float(book_state.asks[0].price)
+                    mid=(bid+ask)/2
+                    if mid>0: spread_bps=(ask-bid)/mid*10000
+                age_ms=None
+                if book_state.last_event_time_ms>0:
+                    age_ms=max(0,int(datetime.now(timezone.utc).timestamp()*1000)-book_state.last_event_time_ms)
+                context=SignalExecutionContext(latency_ms=self.websocket.latency_ms,spread_bps=spread_bps,orderbook_valid=book_state.valid,orderbook_age_ms=age_ms)
+                clusters=tuple(liquidity_state.bid_clusters+liquidity_state.ask_clusters) if liquidity_state.valid else ()
+                signal,msg=self.pipeline.evaluate(state,price,self._atr_from_features(snap),context=context,liquidity_clusters=clusters)
                 if signal.levels is not None and signal.direction.value!="none":
                     await self._record_pending(signal)
                 if msg and self.telegram: await self.telegram.send(msg.text)
