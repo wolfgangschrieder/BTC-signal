@@ -12,6 +12,8 @@ from typing import Any
 import websockets
 from websockets.asyncio.client import ClientConnection
 
+from research_os.pipeline.latency import LatencyTelemetry
+
 logger = logging.getLogger(__name__)
 
 MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
@@ -43,12 +45,14 @@ class BybitWebSocket:
         topics: list[str],
         handler: MessageHandler,
         config: BybitWebSocketConfig | None = None,
+        latency: LatencyTelemetry | None = None,
     ) -> None:
         if not topics:
             raise ValueError("at least one subscription topic is required")
         self._topics = tuple(topics)
         self._handler = handler
         self._config = config or BybitWebSocketConfig()
+        self._latency = latency
         self._stop = asyncio.Event()
         self._ping_sent_monotonic: float | None = None
         self._last_latency_ms: float | None = None
@@ -113,10 +117,16 @@ class BybitWebSocket:
             try:
                 while not self._stop.is_set():
                     try:
+                        receive_started = time.perf_counter()
                         message = await asyncio.wait_for(
                             websocket.recv(),
                             timeout=self._config.receive_timeout_seconds,
                         )
+                        if self._latency is not None:
+                            self._latency.observe(
+                                "ws_receive",
+                                (time.perf_counter() - receive_started) * 1000.0,
+                            )
                     except asyncio.TimeoutError as exc:
                         raise ConnectionError("Bybit WebSocket receive timeout") from exc
                     await self._handle_message(message)
@@ -136,7 +146,13 @@ class BybitWebSocket:
 
     async def _handle_message(self, message: str | bytes) -> None:
         try:
+            decode_started = time.perf_counter()
             decoded = json.loads(message)
+            if self._latency is not None:
+                self._latency.observe(
+                    "ws_decode",
+                    (time.perf_counter() - decode_started) * 1000.0,
+                )
         except (TypeError, json.JSONDecodeError):
             logger.warning("Ignoring malformed Bybit WebSocket JSON")
             return
@@ -169,6 +185,8 @@ class BybitWebSocket:
         finally:
             duration_ms = (time.monotonic() - started) * 1000.0
             self._last_handler_duration_ms = duration_ms
+            if self._latency is not None:
+                self._latency.observe("ws_handler", duration_ms)
             self._max_handler_duration_ms = max(self._max_handler_duration_ms, duration_ms)
             self._messages_processed += 1
             self._handler_started_monotonic = None
