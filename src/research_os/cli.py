@@ -19,6 +19,15 @@ def calibration(symbol,start,end):
     print({"samples":report.samples,"brier":report.brier,"log_loss":report.log_loss,"ece":report.expected_calibration_error,"mce":report.max_calibration_error,"buckets":[{"lower":b.lower,"upper":b.upper,"samples":b.samples,"predicted":b.predicted_mean,"actual":b.actual_rate,"error":b.calibration_error} for b in report.buckets]})
     return 0
 
+def regime(symbol,start,end):
+    from research_os.research.replay_repository import ReplayRepository
+    from research_os.research.regimes import RegimeAnalyzer
+    with SessionLocal() as session:
+        report=ReplayRepository().run(session,symbol,datetime.fromisoformat(start),datetime.fromisoformat(end))
+    analyzed=RegimeAnalyzer().analyze([(x,x.features) for x in report.results])
+    print([{"regime":s.regime.value,"signals":s.signals,"resolved":s.resolved,"wins":s.wins,"losses":s.losses,"expired":s.expired,"win_rate":s.win_rate,"avg_return":s.avg_return} for s in analyzed.stats])
+    return 0
+
 def replay(symbol,start,end):
     from research_os.research.replay_repository import ReplayRepository
     with SessionLocal() as session:
@@ -31,6 +40,7 @@ def main():
     sub.add_parser("health"); sub.add_parser("live")
     rp=sub.add_parser("replay"); rp.add_argument("--symbol",default="BTCUSDT"); rp.add_argument("--start",required=True); rp.add_argument("--end",required=True)
     cp=sub.add_parser("calibration"); cp.add_argument("--symbol",default=None); cp.add_argument("--start",default=None); cp.add_argument("--end",default=None)
+    rg=sub.add_parser("regime"); rg.add_argument("--symbol",default="BTCUSDT"); rg.add_argument("--start",required=True); rg.add_argument("--end",required=True)
     args=parser.parse_args()
     if args.command=="health": raise SystemExit(health())
     if args.command=="live":
@@ -38,4 +48,5 @@ def main():
         live_main()
     if args.command=="replay": raise SystemExit(replay(args.symbol,args.start,args.end))
     if args.command=="calibration": raise SystemExit(calibration(args.symbol,args.start,args.end))
+    if args.command=="regime": raise SystemExit(regime(args.symbol,args.start,args.end))
 if __name__=="__main__": main()
