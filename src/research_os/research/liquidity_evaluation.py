@@ -45,9 +45,9 @@ def compare_regimes(outcomes: Sequence[LiquidityReplayOutcome], horizon_minutes:
     for item in outcomes:
         if item.point.stop_source != "liquidity":
             label="no_liquidity"
-        elif item.point.liquidity_valid and item.point.liquidity_reference is not None:
-            label="persistent_or_clustered_liquidity"
+        elif item.point.cluster_persistent:
+            label="persistent_liquidity"
         else:
-            label="liquidity_unclassified"
+            label="transient_liquidity"
         groups.setdefault(label,[]).append(item)
     return tuple(evaluate(groups[k],k,horizon_minutes) for k in sorted(groups))
