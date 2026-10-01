@@ -4,6 +4,7 @@ import time
 import pytest
 
 from research_os.exchanges.bybit.ws import BybitWebSocket, BybitWebSocketConfig
+from research_os.pipeline.latency import LatencyTelemetry
 
 
 @pytest.mark.asyncio
@@ -58,3 +59,19 @@ async def test_handler_load_telemetry_is_recorded():
     assert ws.last_handler_duration_ms is not None
     assert ws.last_handler_duration_ms >= 0
     assert ws.max_handler_duration_ms >= ws.last_handler_duration_ms
+
+
+@pytest.mark.asyncio
+async def test_transport_latency_telemetry_records_receive_decode_and_handler_stages():
+    telemetry = LatencyTelemetry()
+
+    async def handler(message: dict) -> None:
+        pass
+
+    ws = BybitWebSocket(["orderbook.50.BTCUSDT"], handler, latency=telemetry)
+    await ws._handle_message('{"topic":"orderbook.50.BTCUSDT","type":"snapshot","data":{}}')
+    report = telemetry.report()
+    assert report["ws_decode"]["count"] == 1
+    assert report["ws_handler"]["count"] == 1
+    assert report["ws_decode"]["p99_ms"] is not None
+    assert report["ws_handler"]["p99_ms"] is not None
