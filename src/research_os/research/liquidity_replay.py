@@ -82,3 +82,46 @@ def replay(points: Iterable[LiquidityReplayPoint], candles: Sequence, direction:
         if outcome is not None:
             results.append(outcome)
     return tuple(results)
+
+@dataclass(frozen=True)
+class LiquidityReplayDataset:
+    symbol: str
+    version: str
+    outcomes: tuple[LiquidityReplayOutcome, ...]
+    skipped: int
+    train_count: int
+    test_count: int
+
+def build_dataset(points: Iterable[LiquidityReplayPoint], candles: Sequence,
+                  direction: str, symbol: str = "BTCUSDT", horizon_minutes: int = 60,
+                  train_ratio: float = 0.70) -> LiquidityReplayDataset:
+    if not 0.5 <= train_ratio < 1.0:
+        raise ValueError("train_ratio must be in [0.5, 1)")
+    ordered=sorted(points,key=lambda x:x.timestamp)
+    outcomes=[]; skipped=0
+    for point in ordered:
+        outcome=resolve(point,candles,direction,horizon_minutes)
+        if outcome is None:
+            skipped += 1
+        else:
+            outcomes.append(outcome)
+    cut=int(len(outcomes)*train_ratio)
+    return LiquidityReplayDataset(
+        symbol,
+        f"liquidity-replay-v1:{horizon_minutes}:{train_ratio}",
+        tuple(outcomes),skipped,cut,len(outcomes)-cut)
+
+def chronological_split(dataset: LiquidityReplayDataset):
+    return dataset.outcomes[:dataset.train_count], dataset.outcomes[dataset.train_count:]
+
+def summarize_replay(outcomes: Sequence[LiquidityReplayOutcome]):
+    returns=[x.realized_return_pct for x in outcomes if x.realized_return_pct is not None]
+    if not returns:
+        return {"sample_size":0,"mean_return":None,"positive_rate":None}
+    return {
+        "sample_size":len(returns),
+        "mean_return":sum(returns)/len(returns),
+        "positive_rate":sum(x>0 for x in returns)/len(returns),
+        "mean_mfe":sum(x.mfe_pct for x in outcomes)/len(outcomes),
+        "mean_mae":sum(x.mae_pct for x in outcomes)/len(outcomes),
+    }
