@@ -12,6 +12,13 @@ def health():
     except Exception as exc:
         print({"environment":settings.environment,"database":f"error: {type(exc).__name__}"}); return 1
 
+def calibration(symbol,start,end):
+    from research_os.research.calibration_repository import CalibrationRepository
+    with SessionLocal() as session:
+        report=CalibrationRepository().evaluate(session,symbol,datetime.fromisoformat(start) if start else None,datetime.fromisoformat(end) if end else None)
+    print({"samples":report.samples,"brier":report.brier,"log_loss":report.log_loss,"ece":report.expected_calibration_error,"mce":report.max_calibration_error,"buckets":[{"lower":b.lower,"upper":b.upper,"samples":b.samples,"predicted":b.predicted_mean,"actual":b.actual_rate,"error":b.calibration_error} for b in report.buckets]})
+    return 0
+
 def replay(symbol,start,end):
     from research_os.research.replay_repository import ReplayRepository
     with SessionLocal() as session:
@@ -23,10 +30,12 @@ def main():
     parser=argparse.ArgumentParser(prog="research-os"); sub=parser.add_subparsers(dest="command",required=True)
     sub.add_parser("health"); sub.add_parser("live")
     rp=sub.add_parser("replay"); rp.add_argument("--symbol",default="BTCUSDT"); rp.add_argument("--start",required=True); rp.add_argument("--end",required=True)
+    cp=sub.add_parser("calibration"); cp.add_argument("--symbol",default=None); cp.add_argument("--start",default=None); cp.add_argument("--end",default=None)
     args=parser.parse_args()
     if args.command=="health": raise SystemExit(health())
     if args.command=="live":
         from research_os.pipeline.runtime import main as live_main
         live_main()
     if args.command=="replay": raise SystemExit(replay(args.symbol,args.start,args.end))
+    if args.command=="calibration": raise SystemExit(calibration(args.symbol,args.start,args.end))
 if __name__=="__main__": main()
