@@ -2,6 +2,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Awaitable,Callable
 from datetime import datetime,timezone
+import asyncio
 from research_os.exchanges.bybit.normalizer import BybitNormalizer
 from research_os.exchanges.bybit.ws import BybitWebSocket,BybitWebSocketConfig
 from research_os.market.state_builder import MarketStateBuilder
@@ -56,7 +57,7 @@ class LiveSignalService:
         def write():
             with SessionLocal() as session:
                 self.outcomes.record_pending(session,outcome); session.commit()
-        await __import__("asyncio").to_thread(write)
+        await asyncio.to_thread(write)
     def _range_proxy(self):
         if len(self.closes)<2: return None
         moves=[abs(self.closes[i]-self.closes[i-1]) for i in range(max(1,len(self.closes)-15),len(self.closes))]
