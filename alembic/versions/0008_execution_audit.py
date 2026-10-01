@@ -12,7 +12,7 @@ branch_labels=None
 depends_on=None
 
 def upgrade():
-    op.create_schema("execution", if_not_exists=True)
+    op.execute("CREATE SCHEMA IF NOT EXISTS execution")
 
     op.create_table(
         "orders",
@@ -67,4 +67,4 @@ def downgrade():
     op.drop_table("events",schema="execution")
     op.drop_index("ix_execution_orders_signal_id",table_name="orders",schema="execution")
     op.drop_table("orders",schema="execution")
-    op.drop_schema("execution")
+    op.execute("DROP SCHEMA IF EXISTS execution")
