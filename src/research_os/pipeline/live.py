@@ -23,7 +23,7 @@ EventPublisher=Callable[[object],Awaitable[None]]
 class LiveSignalService:
     """Read-only Bybit live loop. It never sends trading requests."""
     def __init__(self,symbol="BTCUSDT",interval="1",publisher:EventPublisher|None=None,telegram:TelegramClient|None=None,config=None):
-        self.symbol=symbol; self.interval=interval; self.publisher=publisher; self.telegram=telegram; self.closes=deque(maxlen=200); self._last_candle_start=None
+        self.symbol=symbol; self.interval=interval; self.publisher=publisher; self.telegram=telegram; self.closes=deque(maxlen=200); self.highs=deque(maxlen=200); self.lows=deque(maxlen=200); self._last_candle_start=None
         self.features=FeatureEngine(); self.builder=MarketStateBuilder()
         self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(),TelegramFormatter(),SignalGuard())
         self.outcomes=SignalOutcomeRepository()
@@ -35,15 +35,15 @@ class LiveSignalService:
                 event=BybitNormalizer.kline(message); p=event.payload
                 if not p.get("confirm"): return
                 if self._last_candle_start==event.event_time: return
-                self._last_candle_start=event.event_time; self.closes.append(float(p["close"]))
+                self._last_candle_start=event.event_time; self.closes.append(float(p["close"])); self.highs.append(float(p["high"])); self.lows.append(float(p["low"]))
             elif topic.startswith("tickers."): event=BybitNormalizer.ticker(message)
             elif topic.startswith("orderbook."): return
             else: return
             if self.publisher: await self.publisher(event)
             if topic.startswith("kline.") and len(self.closes)>=6:
-                now=datetime.now(timezone.utc); snap=self.features.build(self.symbol,event.event_time,list(self.closes))
+                now=datetime.now(timezone.utc); snap=self.features.build(self.symbol,event.event_time,list(self.closes),highs=list(self.highs),lows=list(self.lows))
                 state=self.builder.build(self.symbol,event.event_time,now,event.point_in_time_available_at,snap,{})
-                signal,msg=self.pipeline.evaluate(state,float(event.payload["close"]),self._range_proxy())
+                signal,msg=self.pipeline.evaluate(state,float(event.payload["close"]),self._atr_from_features(snap))
                 if signal.levels is not None and signal.direction.value!="none":
                     await self._record_pending(signal)
                 if msg and self.telegram: await self.telegram.send(msg.text)
@@ -58,9 +58,11 @@ class LiveSignalService:
             with SessionLocal() as session:
                 self.outcomes.record_pending(session,outcome); session.commit()
         await asyncio.to_thread(write)
-    def _range_proxy(self):
-        if len(self.closes)<2: return None
-        moves=[abs(self.closes[i]-self.closes[i-1]) for i in range(max(1,len(self.closes)-15),len(self.closes))]
-        return sum(moves)/len(moves) if moves else None
+    def _atr_from_features(self, snapshot):
+        for feature in snapshot.features:
+            if feature.name == "atr_14" and feature.available:
+                return feature.value
+        return None
+
     async def run(self): await self.websocket.run()
     async def stop(self): await self.websocket.stop()
