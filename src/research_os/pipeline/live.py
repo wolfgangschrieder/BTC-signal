@@ -48,7 +48,12 @@ class LiveSignalService:
         self._last_orderbook_update=datetime.min.replace(tzinfo=timezone.utc)
         self._recovery_lock=asyncio.Lock()
         self.features=FeatureEngine(); self.builder=MarketStateBuilder()
-        self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(),TelegramFormatter(),guard or SignalGuard())
+        guard_instance = guard or SignalGuard(
+            max_latency_ms=float(getattr(config, "signal_guard_max_latency_ms", 500.0)) if config is not None else 500.0,
+            max_spread_bps=float(getattr(config, "signal_guard_max_spread_bps", 10.0)) if config is not None else 10.0,
+            max_orderbook_age_ms=int(getattr(config, "signal_guard_max_orderbook_age_ms", 5000)) if config is not None else 5000,
+        )
+        self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),SignalEngine(),TelegramFormatter(),guard_instance)
         self.outcomes=SignalOutcomeRepository(); self.states=MarketStateRepository()
         self.websocket=BybitWebSocket(
             [f"kline.{interval}.{symbol}",f"tickers.{symbol}",f"orderbook.50.{symbol}",f"publicTrade.{symbol}",f"allLiquidation.{symbol}"],
