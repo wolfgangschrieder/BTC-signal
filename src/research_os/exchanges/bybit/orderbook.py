@@ -49,6 +49,23 @@ class OrderBook:
         self._valid = False
         self._status = "awaiting_snapshot"
 
+    def restore_snapshot(self, bids, asks, update_id, sequence=None, event_time_ms=0):
+        parsed_bids = self._parse_side(bids)
+        parsed_asks = self._parse_side(asks)
+        if not parsed_bids and not parsed_asks:
+            raise OrderBookError("empty bootstrap snapshot")
+        self._bids = {level.price: level.size for level in parsed_bids if level.size > 0}
+        self._asks = {level.price: level.size for level in parsed_asks if level.size > 0}
+        self._update_id = int(update_id)
+        self._sequence = int(sequence) if sequence is not None else None
+        self._last_event_time_ms = int(event_time_ms)
+        if self._crossed():
+            self._valid = False
+            self._status = "invalid"
+            raise OrderBookError("bootstrap snapshot is crossed")
+        self._valid = True
+        self._status = "valid"
+
     @property
     def state(self) -> OrderBookState:
         return OrderBookState(
