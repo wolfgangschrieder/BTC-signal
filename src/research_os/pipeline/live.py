@@ -12,7 +12,7 @@ from research_os.market.state_builder import MarketStateBuilder
 from research_os.features.engine import FeatureEngine
 from research_os.features.orderflow import OrderFlowEngine, TradeObservation, snapshot_features
 from research_os.features.derivatives import DerivativesEngine, snapshot_features as derivatives_features
-from research_os.features.liquidity import LiquidityEngine
+from research_os.features.liquidity import LiquidityEngine, snapshot_features as liquidity_features
 from research_os.signals.guard import SignalExecutionContext
 from research_os.intelligence.analyzer import MarketAnalyzer
 from research_os.intelligence.probability import ProbabilityEngine
@@ -131,7 +131,12 @@ class LiveSignalService:
                 else:
                     extra={**flow_values,**deriv_values}
                 extra["orderflow_cumulative_delta"]=self.cumulative_delta
+                price=float(event.payload["close"])
+                liquidity_state=self.liquidity.build(self.orderbook.state,price)
+                liquidity_values=liquidity_features(liquidity_state)
+                extra.update(liquidity_values)
                 availability={key: ((flow.available and value is not None) if key.startswith("orderflow_") else (deriv.available and value is not None)) for key,value in extra.items()}
+                for key,value in liquidity_values.items(): availability[key]=liquidity_state.valid and value is not None
                 state=self.builder.build_multi(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap,extra_values=extra,extra_availability=availability)
                 self.previous_derivatives_price=float(event.payload["close"])
                 self.previous_funding=self.derivatives_funding
@@ -140,8 +145,6 @@ class LiveSignalService:
                     with SessionLocal() as session:
                         self.states.save(session,state); session.commit()
                 await asyncio.to_thread(save_state)
-                price=float(event.payload["close"])
-                liquidity_state=self.liquidity.build(self.orderbook.state,price)
                 spread_bps=None
                 book_state=self.orderbook.state
                 if book_state.valid and book_state.bids and book_state.asks:
