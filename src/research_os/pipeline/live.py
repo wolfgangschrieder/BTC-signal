@@ -55,7 +55,7 @@ class LiveSignalService:
             if topic.startswith("publicTrade."):
                 event=BybitNormalizer.trade(message); p=event.payload
                 self.trades.append(TradeObservation(event.event_time(),float(p["price"]),float(p["size"]),str(p["side"])))
-                flow=self.orderflow.build(list(self.trades),event.event_time,cumulative_delta_base=self.cumulative_delta,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
+                flow=self.orderflow.build([self.trades[-1]],event.event_time,cumulative_delta_base=self.cumulative_delta,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
                 if flow.available:
                     self.cumulative_delta=flow.cumulative_delta or self.cumulative_delta
                     self.previous_flow_price=float(p["price"])
@@ -94,8 +94,9 @@ class LiveSignalService:
                 )
                 mtf_snapshot=self.mtf.build(self.symbol,list(self.bars_1m),event.event_time,as_of=now)
                 state=self.builder.build_multi(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap)
-                flow=self.orderflow.build(list(self.trades),event.event_time,cumulative_delta_base=self.cumulative_delta,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
+                flow=self.orderflow.build(list(self.trades),event.event_time,cumulative_delta_base=0.0,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
                 flow_values=snapshot_features(flow)
+                flow_values["orderflow_cumulative_delta"]=self.cumulative_delta
                 state.values.update(flow_values)
                 state.availability.update({key: flow.available and value is not None for key,value in flow_values.items()})
                 def save_state():
