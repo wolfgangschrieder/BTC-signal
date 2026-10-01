@@ -9,7 +9,7 @@ class FeatureEngine:
     """Pure, deterministic features. Missing inputs remain unavailable; never fabricated."""
     version = "features-v1"
 
-    def build(self, symbol: str, timestamp: datetime, closes: Sequence[float], volumes: Sequence[float] = ()) -> FeatureSnapshot:
+    def build(self, symbol: str, timestamp: datetime, closes: Sequence[float], volumes: Sequence[float] = (), highs: Sequence[float] = (), lows: Sequence[float] = ()) -> FeatureSnapshot:
         values: list[FeatureValue] = []
         def add(name, value, available=True, reason=None):
             values.append(FeatureValue(name, value, available, "derived", timestamp, reason))
@@ -29,5 +29,16 @@ class FeatureEngine:
         else: add("realized_vol", None, False, "need at least 2 closes")
         if volumes:
             add("volume_mean", mean(volumes), True)
-        else: add("volume_mean", None, False, "volume unavailable")
+        else:
+            add("volume_mean", None, False, "volume unavailable")
+        if len(closes) >= 2 and len(highs) == len(closes) and len(lows) == len(closes):
+            true_ranges = []
+            for i in range(1, len(closes)):
+                if highs[i] <= 0 or lows[i] <= 0 or closes[i - 1] <= 0:
+                    continue
+                true_ranges.append(max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])))
+            period = min(14, len(true_ranges))
+            add("atr_14", mean(true_ranges[-period:]) if period else None, bool(period), "need valid OHLC history")
+        else:
+            add("atr_14", None, False, "OHLC history unavailable")
         return FeatureSnapshot(symbol, timestamp, tuple(values), self.version)
