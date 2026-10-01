@@ -4,7 +4,7 @@ import json
 
 from sqlalchemy import text
 
-from .research_dataset import ResearchDataset, ResearchDatasetRow
+from .research_dataset import ResearchDataset
 
 
 class ResearchDatasetRepository:
@@ -15,15 +15,16 @@ class ResearchDatasetRepository:
                 text("""
                     INSERT INTO research.research_dataset_rows
                     (dataset_version,symbol,decision_time,entry_price,horizon_minutes,
-                     outcome_time,return_pct,mfe_pct,mae_pct,features,
+                     outcome_time,return_pct,mfe_pct,mae_pct,features,cross_market,
                      external_event_count,external_high_impact_count,
                      external_weighted_sentiment,external_max_relevance,
                      external_categories,external_event_ids)
                     VALUES
                     (:version,:symbol,:decision_time,:entry_price,:horizon,
                      :outcome_time,:return_pct,:mfe_pct,:mae_pct,CAST(:features AS jsonb),
-                     :event_count,:high_impact,:weighted_sentiment,:max_relevance,
-                     CAST(:categories AS jsonb),CAST(:event_ids AS jsonb))
+                     CAST(:cross_market AS jsonb),:event_count,:high_impact,
+                     :weighted_sentiment,:max_relevance,CAST(:categories AS jsonb),
+                     CAST(:event_ids AS jsonb))
                     ON CONFLICT (dataset_version,symbol,decision_time,horizon_minutes)
                     DO UPDATE SET
                         entry_price=EXCLUDED.entry_price,
@@ -32,6 +33,7 @@ class ResearchDatasetRepository:
                         mfe_pct=EXCLUDED.mfe_pct,
                         mae_pct=EXCLUDED.mae_pct,
                         features=EXCLUDED.features,
+                        cross_market=EXCLUDED.cross_market,
                         external_event_count=EXCLUDED.external_event_count,
                         external_high_impact_count=EXCLUDED.external_high_impact_count,
                         external_weighted_sentiment=EXCLUDED.external_weighted_sentiment,
@@ -50,6 +52,7 @@ class ResearchDatasetRepository:
                     "mfe_pct": row.mfe_pct,
                     "mae_pct": row.mae_pct,
                     "features": json.dumps(dict(row.features)),
+                    "cross_market": json.dumps(row.cross_market),
                     "event_count": row.external_event_count,
                     "high_impact": row.external_high_impact_count,
                     "weighted_sentiment": row.external_weighted_sentiment,
@@ -62,25 +65,19 @@ class ResearchDatasetRepository:
         return count
 
     def count(self, session, dataset_version: str, symbol: str) -> int:
-        row = session.execute(
-            text("""
-                SELECT COUNT(*) AS count
-                FROM research.research_dataset_rows
-                WHERE dataset_version=:version AND symbol=:symbol
-            """),
+        value = session.execute(
+            text("SELECT COUNT(*) FROM research.research_dataset_rows WHERE dataset_version=:version AND symbol=:symbol"),
             {"version": dataset_version, "symbol": symbol},
         ).scalar_one()
-        return int(row)
+        return int(value)
 
     def assert_pit_safe(self, session, dataset_version: str, symbol: str) -> int:
-        row = session.execute(
+        value = session.execute(
             text("""
-                SELECT COUNT(*) AS count
-                FROM research.research_dataset_rows
-                WHERE dataset_version=:version
-                  AND symbol=:symbol
+                SELECT COUNT(*) FROM research.research_dataset_rows
+                WHERE dataset_version=:version AND symbol=:symbol
                   AND outcome_time <= decision_time
             """),
             {"version": dataset_version, "symbol": symbol},
         ).scalar_one()
-        return int(row)
+        return int(value)
