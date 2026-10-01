@@ -103,4 +103,6 @@ def snapshot_features(snapshot):
         "derivatives_liquidation_long": snapshot.liquidation_long,
         "derivatives_liquidation_short": snapshot.liquidation_short,
         "derivatives_liquidation_imbalance": snapshot.liquidation_imbalance,
+        "derivatives_state_strength": snapshot.state.strength if snapshot.state else None,
+        "derivatives_state_available": 1.0 if snapshot.state and snapshot.state.available else 0.0,
     }
