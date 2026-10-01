@@ -55,3 +55,25 @@ def compare_sources(observations: Iterable[LiquidityRiskObservation], horizon_mi
     rows=list(observations)
     return {source: summarize(rows,source,horizon_minutes)
             for source in ("liquidity","atr","atr_fallback")}
+
+def from_signal_outcome(signal: dict, stop_source: str, liquidity_reference: float | None,
+                        cluster_size: float | None, cluster_percentile: float | None,
+                        cluster_persistent: bool, cluster_lifetime_ms: int,
+                        atr: float, horizon_minutes: int | None = None) -> LiquidityRiskObservation:
+    """Convert a resolved signal row into an attribution observation.
+
+    This function is intentionally descriptive: it records the risk construction
+    used by the signal and does not infer causality from the liquidity fields.
+    """
+    if atr <= 0:
+        raise ValueError("atr must be positive")
+    entry=float(signal["entry_price"])
+    stop=float(signal["stop_loss"])
+    return LiquidityRiskObservation(
+        signal.get("signal_time"), signal["direction"], entry, atr, stop, stop_source,
+        liquidity_reference, cluster_size, cluster_percentile, cluster_persistent,
+        cluster_lifetime_ms, int(horizon_minutes or signal.get("horizon_minutes") or 60),
+        None if signal.get("realized_return") is None else float(signal["realized_return"]),
+        None if signal.get("mfe") is None else float(signal["mfe"]),
+        None if signal.get("mae") is None else float(signal["mae"]),
+    )
