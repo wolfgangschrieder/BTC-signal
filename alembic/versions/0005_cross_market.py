@@ -1,12 +1,12 @@
 """cross market observations
 Revision ID: 0005_cross_market
-Revises: 0004_derivatives_research
+Revises: 0004_derivatives_research + 0004_signal_outcomes
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 revision="0005_cross_market"
-down_revision="0004_derivatives_research"
+down_revision=("0004_derivatives_research","0004_signal_outcomes")
 branch_labels=None
 depends_on=None
 
