@@ -27,7 +27,8 @@ class MultiTimeframeSnapshot:
     symbol: str
     timestamp: datetime
     snapshots: dict[Timeframe, FeatureSnapshot]
-    version: str="mtf-v1"
+    state: "MultiTimeframeState | None" = None
+    version: str="mtf-v2"
 
 @dataclass(frozen=True)
 class MultiTimeframeAlignment:
@@ -118,7 +119,8 @@ class MultiTimeframeFeatureEngine:
                 [x.high for x in bars],
                 [x.low for x in bars],
             )
-        return MultiTimeframeSnapshot(symbol,timestamp,snapshots,self.version)
+        snapshot=MultiTimeframeSnapshot(symbol,timestamp,snapshots,None,self.version)
+        return MultiTimeframeSnapshot(symbol,timestamp,snapshots,classify_mtf_state(snapshot),"mtf-v2")
 
 def analyze_alignment(mtf: MultiTimeframeSnapshot)->MultiTimeframeAlignment:
     bullish=[]; bearish=[]; available=[]
