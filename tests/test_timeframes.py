@@ -31,3 +31,22 @@ def test_alignment_exposes_conflict_without_probability():
     assert alignment.direction=="bullish"
     assert not alignment.conflicting
     assert alignment.version=="mtf-alignment-v1"
+
+def test_point_in_time_excludes_unavailable_current_bar():
+    source=bars(6)
+    decision=datetime(2026,1,1,0,5,tzinfo=timezone.utc)
+    snapshot=MultiTimeframeFeatureEngine().build("BTCUSDT",source,decision,as_of=decision)
+    one_min=snapshot.snapshots[Timeframe.M1]
+    returns={x.name:x for x in one_min.features}
+    assert returns["return_1"].available is True
+    assert returns["return_1"].value == (104/103)-1
+
+def test_unified_msv_namespaces_each_timeframe():
+    from research_os.market.state_builder import MarketStateBuilder
+    source=bars(20)
+    decision=datetime(2026,1,1,0,20,tzinfo=timezone.utc)
+    snapshot=MultiTimeframeFeatureEngine().build("BTCUSDT",source,decision,as_of=decision)
+    state=MarketStateBuilder().build_multi("BTCUSDT",decision,decision,decision,snapshot)
+    assert "tf_1m_return_1" in state.values
+    assert "tf_5m_return_1" in state.values
+    assert state.availability["tf_1h_return_1"] is False
