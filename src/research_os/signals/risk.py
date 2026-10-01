@@ -47,6 +47,7 @@ class RiskEngine:
         side=direction.lower()
         if side not in {"long","short"}:
             raise ValueError("direction must be long or short")
+        liquidity_available = any(x.side.lower()=="bid" and x.price < entry for x in liquidity_levels) if side=="long" else any(x.side.lower()=="ask" and x.price > entry for x in liquidity_levels)
         stop=self._liquidity_stop(side,entry,atr,liquidity_levels)
         distance=abs(entry-stop)
         if distance<=0:
@@ -54,7 +55,7 @@ class RiskEngine:
             distance=atr
             source="atr_fallback"
         else:
-            source="liquidity" if any(x.price==stop for x in liquidity_levels) else "atr"
+            source="liquidity" if liquidity_available else "atr"
         if side=="long":
             return DynamicRiskLevels(stop,entry+1.5*distance,entry+2.5*distance,entry+3.5*distance,source,stop if source=="liquidity" else None)
         return DynamicRiskLevels(stop,entry-1.5*distance,entry-2.5*distance,entry-3.5*distance,source,stop if source=="liquidity" else None)
