@@ -29,3 +29,24 @@ def test_no_atr_means_no_trade():
     s=SignalEngine().build(a,p,100,None)
     assert s.direction is SignalDirection.NONE
     assert s.levels is None
+
+
+def test_signal_guard_rejects_bad_expected_value():
+    from research_os.signals.guard import SignalGuard
+    a,p=inputs()
+    s=SignalEngine().build(a,p,100,2)
+    from dataclasses import replace
+    rejected=replace(s, expected_value=-0.1)
+    ok,reasons=SignalGuard().validate(rejected)
+    assert not ok
+    assert "expected value" in reasons[0]
+
+def test_signal_guard_rejects_probability_below_threshold():
+    from research_os.signals.guard import SignalGuard
+    a,p=inputs()
+    s=SignalEngine().build(a,p,100,2)
+    from dataclasses import replace
+    rejected=replace(s, probability=0.69)
+    ok,reasons=SignalGuard().validate(rejected)
+    assert not ok
+    assert "probability" in reasons[0]
