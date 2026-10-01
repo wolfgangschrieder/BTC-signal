@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 from datetime import datetime
 from sqlalchemy import text
 from research_os.core.config import get_settings
@@ -11,6 +12,25 @@ def health():
         print({"environment":settings.environment,"database":"ok"}); return 0
     except Exception as exc:
         print({"environment":settings.environment,"database":f"error: {type(exc).__name__}"}); return 1
+
+def cross_market(start,end,assets):
+    from research_os.cross_market.ingestion import CrossMarketIngestionService
+    from research_os.cross_market.providers import FREDProvider
+    settings=get_settings()
+    if not settings.fred_api_key:
+        print({"status":"error","reason":"FRED_API_KEY is not configured"})
+        return 1
+    start_dt=datetime.fromisoformat(start) if start else None
+    end_dt=datetime.fromisoformat(end) if end else None
+    selected=tuple(x.strip() for x in assets.split(",") if x.strip()) if assets else None
+    async def run():
+        service=CrossMarketIngestionService(FREDProvider(settings.fred_api_key))
+        with SessionLocal() as session:
+            total=await service.fetch_and_store(session,start_dt,end_dt,selected)
+            session.commit()
+            return total
+    print({"stored":asyncio.run(run())})
+    return 0
 
 def calibration(symbol,start,end):
     from research_os.research.calibration_repository import CalibrationRepository
@@ -61,6 +81,10 @@ def main():
     parser=argparse.ArgumentParser(prog="research-os")
     sub=parser.add_subparsers(dest="command",required=True)
     sub.add_parser("health"); sub.add_parser("live")
+    cm=sub.add_parser("cross-market")
+    cm.add_argument("--start")
+    cm.add_argument("--end")
+    cm.add_argument("--assets",help="comma-separated FRED assets; default: all configured assets")
     st=sub.add_parser("state")
     st.add_argument("--symbol",default="BTCUSDT")
     st.add_argument("--history",action="store_true")
@@ -75,6 +99,7 @@ def main():
     if args.command=="live":
         from research_os.pipeline.runtime import main as live_main
         live_main()
+    if args.command=="cross-market": raise SystemExit(cross_market(args.start,args.end,args.assets))
     if args.command=="replay": raise SystemExit(replay(args.symbol,args.start,args.end))
     if args.command=="calibration": raise SystemExit(calibration(args.symbol,args.start,args.end))
     if args.command=="regime": raise SystemExit(regime(args.symbol,args.start,args.end))
