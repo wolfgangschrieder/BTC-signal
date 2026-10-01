@@ -28,7 +28,7 @@ def test_derivatives_state_is_explicit_and_reproducible():
     assert s.state.funding_regime == "positive_funding"
     assert s.state.oi_regime == "rising"
     assert s.state.positioning == "crowded_long"
-    assert s.state.liquidation_stress == "high"
+    assert s.state.liquidation_stress == "observed"
 
 
 def test_derivatives_state_unavailable_is_explicit():
