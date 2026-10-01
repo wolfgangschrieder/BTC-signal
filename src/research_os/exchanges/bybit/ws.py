@@ -53,6 +53,11 @@ class BybitWebSocket:
         self._ping_sent_monotonic: float | None = None
         self._last_latency_ms: float | None = None
         self._last_latency_at: datetime | None = None
+        self._messages_processed = 0
+        self._handler_errors = 0
+        self._last_handler_duration_ms: float | None = None
+        self._max_handler_duration_ms: float = 0.0
+        self._handler_started_monotonic: float | None = None
 
     @property
     def latency_ms(self) -> float | None:
@@ -61,6 +66,22 @@ class BybitWebSocket:
     @property
     def latency_at(self) -> datetime | None:
         return self._last_latency_at
+
+    @property
+    def messages_processed(self) -> int:
+        return self._messages_processed
+
+    @property
+    def handler_errors(self) -> int:
+        return self._handler_errors
+
+    @property
+    def last_handler_duration_ms(self) -> float | None:
+        return self._last_handler_duration_ms
+
+    @property
+    def max_handler_duration_ms(self) -> float:
+        return self._max_handler_duration_ms
 
     async def stop(self) -> None:
         self._stop.set()
@@ -136,9 +157,18 @@ class BybitWebSocket:
                 logger.error("Bybit WebSocket operation failed: %s", decoded)
             return
 
+        started = time.monotonic()
+        self._handler_started_monotonic = started
         try:
             await self._handler(decoded)
         except BybitReconnectRequired:
             raise
         except Exception:
+            self._handler_errors += 1
             logger.exception("WebSocket message handler failed; continuing")
+        finally:
+            duration_ms = (time.monotonic() - started) * 1000.0
+            self._last_handler_duration_ms = duration_ms
+            self._max_handler_duration_ms = max(self._max_handler_duration_ms, duration_ms)
+            self._messages_processed += 1
+            self._handler_started_monotonic = None
