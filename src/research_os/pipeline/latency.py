@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from time import perf_counter
 from typing import Iterator
+from contextlib import contextmanager
 
 @dataclass
 class LatencyHistogram:
@@ -30,6 +31,7 @@ class LatencyTelemetry:
     stages: dict[str,LatencyHistogram] = field(default_factory=lambda: defaultdict(LatencyHistogram))
     def observe(self, stage: str, elapsed_ms: float) -> None:
         self.stages[stage].observe(elapsed_ms)
+    @contextmanager
     def timer(self, stage: str) -> Iterator[None]:
         start=perf_counter()
         try:
