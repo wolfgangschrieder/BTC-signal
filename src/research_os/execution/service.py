@@ -93,3 +93,12 @@ class ExecutionService:
                 self.repository.save(record)
                 self.repository.append_event(client_order_id,record.signal_id,"status_transition",record.status.value,now,from_status=current.status.value,reason=reason,exchange_order_id=record.exchange_order_id)
             return record
+
+    def restore(self, record: ExecutionRecord) -> ExecutionRecord:
+        """Rehydrate an execution record loaded from persistent storage."""
+        with self._lock:
+            existing=self._records.get(record.client_order_id)
+            if existing is not None and existing.status is not record.status:
+                raise ValueError("conflicting in-memory execution state")
+            self._records[record.client_order_id]=record
+        return record
