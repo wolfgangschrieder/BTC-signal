@@ -21,3 +21,14 @@ def test_invalid_book_produces_unavailable_state():
     state=LiquidityEngine().build(book.state,100)
     assert not state.valid
     assert state.strongest_bid is None
+
+
+def test_cluster_becomes_persistent_after_repeated_observation():
+    book=OrderBook("BTCUSDT")
+    book.restore_snapshot([["100","2"],["99.99","3"]],[["101","2"],["101.01","3"]],1,event_time_ms=1000)
+    engine=LiquidityEngine(persistence_min_ms=1000)
+    first=engine.build(book.state,100.5,timestamp_ms=1000)
+    second=engine.build(book.state,100.5,timestamp_ms=2000)
+    assert not first.strongest_bid.persistent
+    assert second.strongest_bid.persistent
+    assert second.strongest_bid.lifetime_ms >= 1000
