@@ -91,7 +91,7 @@ class LiquidityEngine:
         ts=timestamp_ms or orderbook_state.last_event_time_ms
         bids=self._with_persistence(_cluster("bid",orderbook_state.bids,reference_price,gap_bps,min_levels),ts)
         asks=self._with_persistence(_cluster("ask",orderbook_state.asks,reference_price,gap_bps,min_levels),ts)
-        return LiquidityState(ts,True,tuple(bids),tuple(asks),bids[0] if bids else None,asks[0] if asks else None)
+        return LiquidityState(ts,True,tuple(bids),tuple(asks),max(bids,key=lambda x:x.total_size,default=None),max(asks,key=lambda x:x.total_size,default=None))
 
 
 def snapshot_features(state: LiquidityState) -> dict[str, float | None]:
