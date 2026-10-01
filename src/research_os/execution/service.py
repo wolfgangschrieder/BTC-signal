@@ -33,8 +33,9 @@ class ExecutionService:
     """Orchestrates human-confirmed execution state; exchange I/O is injected."""
     version="execution-service-v1"
 
-    def __init__(self, guard: ExecutionGuard | None=None):
+    def __init__(self, guard: ExecutionGuard | None=None, repository=None):
         self.guard=guard or ExecutionGuard()
+        self.repository=repository
         self._records: dict[str,ExecutionRecord]={}
         self._lock=Lock()
 
@@ -47,6 +48,9 @@ class ExecutionService:
             record=ExecutionRecord(intent.client_order_id,signal.signal_id,ExecutionStatus.BLOCKED,now,now,intent,"; ".join(result.reasons))
             with self._lock:
                 self._records[intent.client_order_id]=record
+            if self.repository is not None:
+                self.repository.save(record)
+                self.repository.append_event(record.client_order_id,record.signal_id,"execution_blocked",record.status.value,now,reason=record.reason)
             return record
         intent=OrderIntent.from_signal(signal,quantity,now)
         with self._lock:
@@ -55,6 +59,9 @@ class ExecutionService:
                 return existing
             record=ExecutionRecord(intent.client_order_id,signal.signal_id,ExecutionStatus.CREATED,now,now,intent)
             self._records[intent.client_order_id]=record
+            if self.repository is not None:
+                self.repository.save(record)
+                self.repository.append_event(record.client_order_id,record.signal_id,"execution_created",record.status.value,now)
             return record
 
     def get(self, client_order_id: str) -> ExecutionRecord | None:
@@ -82,4 +89,7 @@ class ExecutionService:
                 raise ValueError(f"invalid transition {current.status.value}->{status.value}")
             record=ExecutionRecord(current.client_order_id,current.signal_id,status,current.created_at,now,current.intent,reason,exchange_order_id or current.exchange_order_id)
             self._records[client_order_id]=record
+            if self.repository is not None:
+                self.repository.save(record)
+                self.repository.append_event(client_order_id,record.signal_id,"status_transition",record.status.value,now,from_status=current.status.value,reason=reason,exchange_order_id=record.exchange_order_id)
             return record
