@@ -12,6 +12,7 @@ class RiskPolicy:
     target_risk: float=0.005
     atr_multiplier: float=1.0
     liquidity_buffer_atr: float=0.15
+    require_persistent_liquidity: bool=True
 
 @dataclass(frozen=True)
 class LiquidityLevel:
@@ -79,6 +80,6 @@ class RiskEngine:
         if atr <= 0: return None
         candidates=[]
         for c in clusters:
-            if side=="long" and c.side=="bid" and c.center_price < entry and entry-c.center_price <= 3*atr: candidates.append(c)
-            if side=="short" and c.side=="ask" and c.center_price > entry and c.center_price-entry <= 3*atr: candidates.append(c)
+            if side=="long" and c.side=="bid" and c.center_price < entry and entry-c.center_price <= 3*atr and (c.persistent or not RiskEngine().policy.require_persistent_liquidity): candidates.append(c)
+            if side=="short" and c.side=="ask" and c.center_price > entry and c.center_price-entry <= 3*atr and (c.persistent or not RiskEngine().policy.require_persistent_liquidity): candidates.append(c)
         return max(candidates,key=lambda c:(c.size_percentile,c.total_size),default=None)
