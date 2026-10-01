@@ -41,6 +41,7 @@ class LiveSignalService:
         self.derivatives=DerivativesEngine(); self.derivatives_funding=None; self.derivatives_oi=None; self.previous_derivatives_price=None; self.previous_funding=None; self.previous_oi=None; self.liquidations=deque(maxlen=5000)
         self.mtf=MultiTimeframeFeatureEngine()
         self.liquidity=LiquidityEngine()
+        self._liquidity_state=None
         self._last_candle_start=None
         self.orderbook=OrderBook(symbol,max_levels=50)
         self.rest=BybitRestClient()
@@ -92,6 +93,12 @@ class LiveSignalService:
                         await self._recover_orderbook()
                     return
                 self._last_orderbook_update=datetime.now(timezone.utc)
+                book_state=self.orderbook.state
+                if book_state.valid and book_state.bids and book_state.asks:
+                    mid=(float(book_state.bids[0].price)+float(book_state.asks[0].price))/2
+                    self._liquidity_state=self.liquidity.build(book_state,mid,book_state.last_event_time_ms)
+                else:
+                    self._liquidity_state=None
                 event=BybitNormalizer.orderbook(message)
                 event.payload["valid"]=self.orderbook.state.valid
                 if self.publisher: await self.publisher(event)
@@ -132,7 +139,10 @@ class LiveSignalService:
                     extra={**flow_values,**deriv_values}
                 extra["orderflow_cumulative_delta"]=self.cumulative_delta
                 price=float(event.payload["close"])
-                liquidity_state=self.liquidity.build(self.orderbook.state,price)
+                liquidity_state=self._liquidity_state
+                if liquidity_state is None or liquidity_state.timestamp_ms != self.orderbook.state.last_event_time_ms:
+                    liquidity_state=self.liquidity.build(self.orderbook.state,price,self.orderbook.state.last_event_time_ms)
+                    self._liquidity_state=liquidity_state
                 liquidity_values=liquidity_features(liquidity_state)
                 extra.update(liquidity_values)
                 availability={key: ((flow.available and value is not None) if key.startswith("orderflow_") else (deriv.available and value is not None)) for key,value in extra.items()}
