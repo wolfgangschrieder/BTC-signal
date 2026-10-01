@@ -25,3 +25,14 @@ def test_market_state_vector_is_not_a_signal():
     )
     assert state.symbol == "BTCUSDT"
     assert not hasattr(state, "direction")
+
+
+def test_msv_separates_numeric_and_categorical_values():
+    from datetime import datetime, timezone
+    from research_os.market.state_vector import MarketStateVector
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    s=MarketStateVector.build("BTCUSDT",t,t,t,{"return_1":0.01,"mtf_trend":"bullish","flag":True},{}, {})
+    assert s.numeric["return_1"]==0.01
+    assert s.categorical["mtf_trend"]=="bullish"
+    assert s.numeric["flag"]==1.0
+    assert s.fingerprint
