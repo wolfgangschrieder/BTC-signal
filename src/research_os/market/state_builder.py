@@ -12,10 +12,14 @@ class MarketStateBuilder:
         return MarketStateVector.build(symbol,timestamp,decision_time,pit,values,availability,quality,snapshot.version)
 
 
-    def build_multi(self, symbol: str, timestamp: datetime, decision_time: datetime, pit: datetime, snapshot, data_quality: dict[str,str] | None = None) -> MarketStateVector:
+    def build_multi(self, symbol: str, timestamp: datetime, decision_time: datetime, pit: datetime, snapshot, base_snapshot: FeatureSnapshot | None = None, data_quality: dict[str,str] | None = None) -> MarketStateVector:
         """Build one unified MSV with namespaced multi-timeframe features."""
         availability={}
         values={}
+        if base_snapshot is not None:
+            for feature in base_snapshot.features:
+                values[feature.name]=feature.value
+                availability[feature.name]=feature.available
         for timeframe, feature_snapshot in snapshot.snapshots.items():
             prefix=timeframe.value
             for feature in feature_snapshot.features:
