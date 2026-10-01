@@ -14,7 +14,6 @@ class MarketStateBuilder:
 
     def build_multi(self, symbol: str, timestamp: datetime, decision_time: datetime, pit: datetime, snapshot, data_quality: dict[str,str] | None = None) -> MarketStateVector:
         """Build one unified MSV with namespaced multi-timeframe features."""
-        values={f.name:f.value for f in snapshot.snapshots.get(__import__("research_os.features.timeframes",fromlist=["Timeframe"]).Timeframe.M1, []).features} if False else {}
         availability={}
         values={}
         for timeframe, feature_snapshot in snapshot.snapshots.items():
