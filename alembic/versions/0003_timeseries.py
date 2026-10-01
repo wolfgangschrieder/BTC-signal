@@ -27,7 +27,7 @@ def upgrade():
     for schema,name in [("market","trades"),("market","orderbook_updates"),("market","orderbook_snapshots"),("market","market_snapshots"),("market","candles"),("derivatives","funding_rates"),("derivatives","open_interest"),("derivatives","liquidations")]:
         _hypertable(schema,name)
     for schema,name in [("market","trades"),("market","orderbook_updates"),("market","orderbook_snapshots"),("market","market_snapshots"),("market","candles"),("derivatives","funding_rates"),("derivatives","open_interest"),("derivatives","liquidations")]:
-        op.create_index(f"ix_{schema}_{name}_symbol_event_time","{name}",["symbol","event_time"],schema=schema)
+        op.create_index(f"ix_{schema}_{name}_symbol_event_time",name,["symbol","event_time"],schema=schema)
     for table in ("trades","orderbook_updates","orderbook_snapshots","market_snapshots"):
         op.create_index(f"ix_market_{table}_raw_event_id",table,["raw_event_id"],schema="market")
 
