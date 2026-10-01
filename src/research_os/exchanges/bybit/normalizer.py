@@ -10,9 +10,10 @@ class BybitNormalizer:
         return RawEvent(source="bybit",event_type=EventType.TRADE,symbol=model.symbol,event_time=model.event_time(),ingestion_time=ingested,point_in_time_available_at=ingested,payload=model.model_dump(mode="json"))
     @staticmethod
     def ticker(raw,ingestion_time=None):
-        model=BybitTicker.model_validate(raw["data"]); ingested=ingestion_time or datetime.now(timezone.utc)
+        data=raw["data"]; data=data[0] if isinstance(data,list) else data
+        item={"symbol":data["symbol"],"last_price":data["lastPrice"],"bid_price":data.get("bid1Price"),"ask_price":data.get("ask1Price"),"funding_rate":data.get("fundingRate"),"open_interest":data.get("openInterest"),"next_funding_time_ms":int(data["nextFundingTime"]) if data.get("nextFundingTime") else None,"timestamp_ms":int(raw["ts"])}
+        model=BybitTicker.model_validate(item); ingested=ingestion_time or datetime.now(timezone.utc)
         return RawEvent(source="bybit",event_type=EventType.TICKER,symbol=model.symbol,event_time=datetime.fromtimestamp(model.timestamp_ms/1000,tz=timezone.utc),ingestion_time=ingested,point_in_time_available_at=ingested,payload=model.model_dump(mode="json"))
-    @staticmethod
     def kline(raw,ingestion_time=None):
         data=raw["data"]; item=data[0] if isinstance(data,list) else data
         item={**item,"symbol":raw["topic"].rsplit(".",1)[-1],"interval":str(item["interval"]),"start_ms":int(item["start"]),"timestamp_ms":int(raw["ts"])}
