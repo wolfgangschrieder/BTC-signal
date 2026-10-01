@@ -20,6 +20,8 @@ def _sign(value, positive, negative):
     return positive if value > 0 else negative
 
 def classify(snapshot: CrossMarketSnapshot) -> CrossMarketState:
+    if not snapshot.synchronized:
+        return CrossMarketState("unknown","unknown","unknown","unknown","unknown","unsynchronized",0.0,False)
     v=snapshot.values
     keys=("NASDAQ_return","SPX_return","VIX_return")
     dollar_available=(v.get("DOLLAR_BROAD_return") is not None or v.get("DXY_return") is not None)
