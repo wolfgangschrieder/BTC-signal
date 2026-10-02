@@ -64,9 +64,23 @@ class OOSCalibrationEvaluator:
         validation: list[SignalOutcome] | tuple[SignalOutcome, ...],
         test: list[SignalOutcome] | tuple[SignalOutcome, ...],
     ) -> OOSCalibrationEvaluation:
-        train_samples = self.samples_from_outcomes(train)
-        validation_samples = self.samples_from_outcomes(validation)
-        test_samples = self.samples_from_outcomes(test)
+        return self.evaluate_samples(
+            train=self.samples_from_outcomes(train),
+            validation=self.samples_from_outcomes(validation),
+            test=self.samples_from_outcomes(test),
+        )
+
+    def evaluate_samples(
+        self,
+        *,
+        train: list[CalibrationSample] | tuple[CalibrationSample, ...],
+        validation: list[CalibrationSample] | tuple[CalibrationSample, ...],
+        test: list[CalibrationSample] | tuple[CalibrationSample, ...],
+    ) -> OOSCalibrationEvaluation:
+        """Evaluate frozen probabilities; no calibration parameters are fitted here."""
+        train_samples = list(train)
+        validation_samples = list(validation)
+        test_samples = list(test)
 
         report = self.lab.evaluate(test_samples)
         reasons: list[str] = []
