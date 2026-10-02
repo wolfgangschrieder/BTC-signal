@@ -73,3 +73,18 @@ def test_oos_evaluator_applies_only_oos_acceptance_gates():
 def test_invalid_oos_configuration_is_rejected(kwargs):
     with pytest.raises(ValueError):
         OOSCalibrationEvaluator(**kwargs)
+
+
+def test_oos_evaluator_accepts_frozen_calibration_samples():
+    from research_os.intelligence.probability import CalibrationSample
+
+    evaluator = OOSCalibrationEvaluator(min_test_samples=2)
+    result = evaluator.evaluate_samples(
+        train=[CalibrationSample(.8, 1)],
+        validation=[CalibrationSample(.7, 0)],
+        test=[CalibrationSample(.6, 1), CalibrationSample(.4, 0)],
+    )
+
+    assert result.test_samples == 2
+    assert result.report.samples == 2
+    assert result.accepted is True
