@@ -18,13 +18,13 @@ class ResearchDatasetRepository:
                      outcome_time,return_pct,mfe_pct,mae_pct,features,cross_market,
                      external_event_count,external_high_impact_count,
                      external_weighted_sentiment,external_max_relevance,
-                     external_categories,external_event_ids)
+                     external_categories,external_event_ids,provenance)
                     VALUES
                     (:version,:symbol,:decision_time,:entry_price,:horizon,
                      :outcome_time,:return_pct,:mfe_pct,:mae_pct,CAST(:features AS jsonb),
                      CAST(:cross_market AS jsonb),:event_count,:high_impact,
                      :weighted_sentiment,:max_relevance,CAST(:categories AS jsonb),
-                     CAST(:event_ids AS jsonb))
+                     CAST(:event_ids AS jsonb),CAST(:provenance AS jsonb))
                     ON CONFLICT (dataset_version,symbol,decision_time,horizon_minutes)
                     DO UPDATE SET
                         entry_price=EXCLUDED.entry_price,
@@ -39,7 +39,8 @@ class ResearchDatasetRepository:
                         external_weighted_sentiment=EXCLUDED.external_weighted_sentiment,
                         external_max_relevance=EXCLUDED.external_max_relevance,
                         external_categories=EXCLUDED.external_categories,
-                        external_event_ids=EXCLUDED.external_event_ids
+                        external_event_ids=EXCLUDED.external_event_ids,
+                        provenance=EXCLUDED.provenance
                 """),
                 {
                     "version": dataset.version,
@@ -59,6 +60,17 @@ class ResearchDatasetRepository:
                     "max_relevance": row.external_max_relevance,
                     "categories": json.dumps(row.external_categories),
                     "event_ids": json.dumps(row.external_event_ids),
+                    "provenance": json.dumps([
+                        {
+                            "source": item.source,
+                            "source_id": item.source_id,
+                            "first_event_time": item.first_event_time.isoformat(),
+                            "last_event_time": item.last_event_time.isoformat(),
+                            "available_at": item.available_at.isoformat(),
+                            "item_count": item.item_count,
+                        }
+                        for item in row.provenance
+                    ]),
                 },
             )
             count += 1
