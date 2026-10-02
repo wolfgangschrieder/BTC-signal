@@ -25,7 +25,10 @@ def test_dataset_joins_pit_evidence_to_future_outcome():
     assert row.entry_price == 100.0
     assert row.return_pct == pytest.approx(0.02)
     assert row.external_event_ids == ("known",)
-    assert row.features == (("x", 1.5),)
+    assert ("x", 1.5) in row.features
+    assert ("volume_mean", 1.0) in row.features
+    assert ("state:volume_mean", 1.0) in row.features
+    assert all(name != "missing" for name, _ in row.features)
     assert ResearchDatasetBuilder.audit_pit(dataset, events) == ()
 
 
