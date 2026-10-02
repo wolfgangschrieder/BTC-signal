@@ -31,6 +31,17 @@ def audit_dataset_evidence(
                 DatasetLeakageViolation(row.decision_time, "outcome", row.symbol, row.outcome_time)
             )
 
+        for evidence in row.provenance:
+            if evidence.available_at > row.decision_time:
+                violations.append(
+                    DatasetLeakageViolation(
+                        row.decision_time,
+                        evidence.source,
+                        evidence.source_id,
+                        evidence.available_at,
+                    )
+                )
+
         event_ids = set(row.external_event_ids)
         for event in external_events:
             if event.event_id in event_ids and event.point_in_time_available_at > row.decision_time:
