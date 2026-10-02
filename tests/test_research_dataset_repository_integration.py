@@ -4,7 +4,11 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import create_engine, text
 
-from research_os.research.research_dataset import ResearchDataset, ResearchDatasetRow
+from research_os.research.research_dataset import (
+    EvidenceProvenance,
+    ResearchDataset,
+    ResearchDatasetRow,
+)
 from research_os.research.research_dataset_repository import ResearchDatasetRepository
 
 
@@ -28,12 +32,23 @@ def db():
 
 def make_dataset():
     t = datetime(2026, 1, 2, 12, tzinfo=timezone.utc)
+    provenance = (
+        EvidenceProvenance(
+            "external_event",
+            "evt-1",
+            t - timedelta(minutes=1),
+            t - timedelta(minutes=1),
+            t - timedelta(seconds=30),
+            1,
+        ),
+    )
     row = ResearchDatasetRow(
         "BTCUSDT", t, 100.0, 60, t + timedelta(hours=1),
         0.01, 0.02, -0.01,
         (("atr", 1.2),),
         (("DOLLAR_BROAD", 1.0, 0.5, 0.8, 30, True),),
         1, 1, 0.5, 0.9, ("macro",), ("evt-1",),
+        provenance,
     )
     return ResearchDataset("BTCUSDT", "integration-v1", (row,), 0)
 
@@ -49,7 +64,7 @@ def test_repository_round_trip_and_pit_audit(db):
     stored = db.execute(
         text(
             "SELECT decision_time, outcome_time, features, cross_market, "
-            "external_event_ids "
+            "external_event_ids, provenance "
             "FROM research.research_dataset_rows "
             "WHERE dataset_version=:version AND symbol=:symbol"
         ),
@@ -61,6 +76,10 @@ def test_repository_round_trip_and_pit_audit(db):
     assert stored["features"]["atr"] == 1.2
     assert stored["cross_market"][0][0] == "DOLLAR_BROAD"
     assert stored["external_event_ids"] == ["evt-1"]
+    assert stored["provenance"][0]["source"] == "external_event"
+    assert stored["provenance"][0]["source_id"] == "evt-1"
+    assert stored["provenance"][0]["item_count"] == 1
+    assert stored["provenance"][0]["available_at"] == (t := dataset.rows[0].decision_time - timedelta(seconds=30)).isoformat()
 
 
 def test_repository_upsert_replaces_existing_row(db):
@@ -78,7 +97,7 @@ def test_repository_upsert_replaces_existing_row(db):
             row.features, row.cross_market, row.external_event_count,
             row.external_high_impact_count, row.external_weighted_sentiment,
             row.external_max_relevance, row.external_categories,
-            row.external_event_ids,
+            row.external_event_ids, row.provenance,
         ),),
         0,
     )
