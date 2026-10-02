@@ -14,6 +14,19 @@ from research_os.research.replay import ReplayCandle
 
 
 @dataclass(frozen=True, slots=True)
+class EvidenceProvenance:
+    source: str
+    source_id: str
+    first_event_time: datetime
+    last_event_time: datetime
+    available_at: datetime
+    item_count: int
+
+    def is_pit_valid(self, decision_time: datetime) -> bool:
+        return self.available_at <= decision_time
+
+
+@dataclass(frozen=True, slots=True)
 class ResearchDatasetRow:
     symbol: str
     decision_time: datetime
@@ -31,6 +44,7 @@ class ResearchDatasetRow:
     external_max_relevance: float
     external_categories: tuple[str, ...]
     external_event_ids: tuple[str, ...]
+    provenance: tuple[EvidenceProvenance, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +63,7 @@ class DatasetPITViolation:
 
 
 class ResearchDatasetBuilder:
-    version = "research-dataset-v2"
+    version = "research-dataset-v3"
 
     def __init__(self, feature_engine=None, state_builder=None, cross_market_engine=None, external_engine=None):
         self.features = feature_engine or FeatureEngine()
@@ -150,6 +164,45 @@ class ResearchDatasetBuilder:
                 lookback_seconds=external_lookback_seconds, min_relevance=min_event_relevance
             )
 
+            pit_candles = tuple(c for c in available if c.point_in_time_available_at is not None)
+            candle_available_at = max((c.point_in_time_available_at or c.event_time) for c in available)
+            provenance = [
+                EvidenceProvenance(
+                    "market_candles",
+                    f"{symbol}:{available[0].event_time.isoformat()}:{available[-1].event_time.isoformat()}",
+                    available[0].event_time,
+                    available[-1].event_time,
+                    candle_available_at,
+                    len(available),
+                )
+            ]
+            if observations:
+                relevant_obs = tuple(
+                    o for o in observations
+                    if o.timestamp <= decision_time and o.point_in_time_available_at <= decision_time
+                )
+                if relevant_obs:
+                    provenance.append(EvidenceProvenance(
+                        "cross_market",
+                        f"{len(relevant_obs)}-observations",
+                        min(o.timestamp for o in relevant_obs),
+                        max(o.timestamp for o in relevant_obs),
+                        max(o.point_in_time_available_at for o in relevant_obs),
+                        len(relevant_obs),
+                    ))
+            if external.events:
+                provenance.extend(
+                    EvidenceProvenance(
+                        "external_event",
+                        e.event_id,
+                        e.event_time,
+                        e.event_time,
+                        e.point_in_time_available_at,
+                        1,
+                    )
+                    for e in external.events
+                )
+
             entry = float(available[-1].close)
             final = future[-1]
             rows.append(ResearchDatasetRow(
@@ -161,6 +214,7 @@ class ResearchDatasetBuilder:
                 external.total_count, external.high_impact_count,
                 external.weighted_sentiment, external.max_relevance,
                 external.categories, tuple(e.event_id for e in external.events),
+                tuple(provenance),
             ))
 
         rows.sort(key=lambda r: (r.decision_time, r.outcome_time))
@@ -175,14 +229,10 @@ class ResearchDatasetBuilder:
         for row in dataset.rows:
             if row.outcome_time <= row.decision_time:
                 violations.append(DatasetPITViolation(row.decision_time, "outcome_time", row.outcome_time))
-            for event in external_events:
-                if event.event_id in row.external_event_ids and event.point_in_time_available_at > row.decision_time:
-                    violations.append(DatasetPITViolation(row.decision_time, f"external_event:{event.event_id}", event.point_in_time_available_at))
-            for asset, _, _, _, _, _ in row.cross_market:
-                for obs in cross_market_observations:
-                    if obs.asset == asset and obs.timestamp <= row.decision_time and obs.point_in_time_available_at > row.decision_time:
-                        violations.append(DatasetPITViolation(row.decision_time, f"cross_market:{asset}", obs.point_in_time_available_at))
-        return tuple(violations)
+            for evidence in row.provenance:
+                if evidence.available_at > row.decision_time:
+                    violations.append(DatasetPITViolation(row.decision_time, f"provenance:{evidence.source}:{evidence.source_id}", evidence.available_at))
+        return tuple(sorted(violations, key=lambda v: (v.decision_time, v.field, v.value_time)))
 
     @staticmethod
     def chronological_split(dataset, train_ratio=0.7, purge_minutes=None):
