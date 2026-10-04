@@ -32,19 +32,74 @@ def cross_market(start,end,assets):
     print({"stored":asyncio.run(run())})
     return 0
 
-def dataset(symbol,start,end,version,horizons):
-    from research_os.research.dataset_repository import ResearchDatasetRepository
+def dataset(symbol,start,end,version,horizon):
+    from research_os.cross_market.models import CrossMarketObservation
+    from research_os.intelligence.event_repository import ExternalEventRepository
+    from research_os.research.research_dataset import ResearchDatasetBuilder
+    from research_os.research.research_dataset_repository import ResearchDatasetRepository
+    from research_os.research.replay_repository import ReplayRepository
+
+    if not start or not end:
+        raise ValueError("--start and --end are required for dataset")
+    start_dt=datetime.fromisoformat(start)
+    end_dt=datetime.fromisoformat(end)
+    horizon_minutes=int(horizon)
+
     with SessionLocal() as session:
-        total=ResearchDatasetRepository().build_resolved(
-            session,
-            dataset_version=version,
-            symbol=symbol,
-            start=datetime.fromisoformat(start) if start else None,
-            end=datetime.fromisoformat(end) if end else None,
-            horizons=tuple(int(x.strip()) for x in horizons.split(",") if x.strip()),
+        candles=ReplayRepository().load_candles(session,symbol,start_dt,end_dt)
+        decision_times=tuple(c.event_time for c in candles)
+        state_rows=session.execute(text("""
+            SELECT timestamp, vector
+            FROM world.market_state_vectors
+            WHERE symbol=:symbol
+              AND timestamp>=:start AND timestamp<=:end
+              AND point_in_time_available_at<=decision_time
+            ORDER BY timestamp
+        """),{"symbol":symbol,"start":start_dt,"end":end_dt}).mappings().all()
+        features_by_time={}
+        for row in state_rows:
+            values=(row["vector"] or {}).get("values",row["vector"] or {})
+            features_by_time[row["timestamp"]]={
+                key: float(value) for key,value in values.items()
+                if isinstance(value,(int,float)) and not isinstance(value,bool)
+            }
+
+        cross_rows=session.execute(text("""
+            SELECT asset,event_time,point_in_time_available_at,value,source,unit
+            FROM intelligence.cross_market_observations
+            WHERE event_time<=:end AND point_in_time_available_at<=:end
+            ORDER BY event_time, asset
+        """),{"end":end_dt}).mappings().all()
+        cross_market_observations=tuple(
+            CrossMarketObservation(
+                asset=row["asset"],timestamp=row["event_time"],
+                point_in_time_available_at=row["point_in_time_available_at"],
+                value=float(row["value"]),source=row["source"],unit=row["unit"] or "raw",
+            )
+            for row in cross_rows
         )
+
+        external_rows=session.execute(text("""
+            SELECT event_id,title,source,event_time,point_in_time_available_at,
+                   category,impact,relevance,sentiment,confidence,payload
+            FROM intelligence.external_events
+            WHERE event_time<=:end AND point_in_time_available_at<=:end
+            ORDER BY event_time
+        """),{"end":end_dt}).mappings().all()
+        external_events=tuple(ExternalEventRepository._to_event(row) for row in external_rows)
+
+        built=ResearchDatasetBuilder().build(
+            symbol,decision_times,candles,
+            cross_market_observations=cross_market_observations,
+            features_by_time=features_by_time,
+            external_events=external_events,
+            horizon_minutes=horizon_minutes,
+        )
+        saved=ResearchDatasetRepository().save(session,built)
         session.commit()
-    print({"dataset_version":version,"rows_inserted":total})
+    pit_violations=ResearchDatasetBuilder.audit_pit(built,external_events,cross_market_observations)
+    print({"dataset_version":built.version,"rows":len(built.rows),"saved":saved,
+           "skipped":built.skipped,"pit_violations":len(pit_violations)})
     return 0
 
 def calibration(symbol,start,end):
