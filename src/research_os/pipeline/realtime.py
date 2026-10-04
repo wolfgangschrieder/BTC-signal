@@ -33,7 +33,12 @@ class RealtimeSignalPipeline:
                 signal=self.signal.build(analysis,probability,price,atr,liquidity_clusters=liquidity_clusters)
             with self.latency.timer("guard"):
                 allowed=self.guard.allow(signal,context)
+
         message=None
         if allowed:
             message=self.formatter.format(signal)
+            # Guard cooldown is stateful policy, so a successful emission must
+            # atomically advance its suppression state in the same pipeline that
+            # performed validation. Previously mark_sent() was never called.
+            self.guard.mark_sent(signal)
         return signal,message
