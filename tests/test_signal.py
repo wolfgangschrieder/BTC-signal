@@ -30,12 +30,11 @@ def test_no_atr_means_no_trade():
     assert s.direction is SignalDirection.NONE
     assert s.levels is None
 
-
 def test_signal_guard_rejects_bad_expected_value():
     from research_os.signals.guard import SignalGuard
+    from dataclasses import replace
     a,p=inputs()
     s=SignalEngine().build(a,p,100,2)
-    from dataclasses import replace
     rejected=replace(s, expected_value=-0.1)
     ok,reasons=SignalGuard().validate(rejected)
     assert not ok
@@ -43,14 +42,13 @@ def test_signal_guard_rejects_bad_expected_value():
 
 def test_signal_guard_rejects_probability_below_threshold():
     from research_os.signals.guard import SignalGuard
+    from dataclasses import replace
     a,p=inputs()
     s=SignalEngine().build(a,p,100,2)
-    from dataclasses import replace
     rejected=replace(s, probability=0.69)
     ok,reasons=SignalGuard().validate(rejected)
     assert not ok
     assert "probability" in reasons[0]
-
 
 def test_signal_guard_fails_closed_on_data_quality_degradation():
     from research_os.signals.guard import SignalGuard, SignalExecutionContext
@@ -59,3 +57,14 @@ def test_signal_guard_fails_closed_on_data_quality_degradation():
     ok,reasons=SignalGuard().validate(s, SignalExecutionContext(data_quality_ok=False))
     assert not ok
     assert reasons == ("data quality degraded",)
+
+def test_signal_guard_cooldown_blocks_repeated_emission():
+    from research_os.signals.guard import SignalGuard
+    a,p=inputs()
+    s=SignalEngine().build(a,p,100,2)
+    guard=SignalGuard()
+    assert guard.allow(s)
+    guard.mark_sent(s)
+    ok,reasons=guard.validate(s)
+    assert not ok
+    assert reasons == ("duplicate signal inside cooldown",)
