@@ -4,7 +4,8 @@ from datetime import datetime
 from collections.abc import Sequence
 import asyncio
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, slots=True)
 class TradeObservation:
     timestamp: datetime
     price: float
@@ -12,7 +13,8 @@ class TradeObservation:
     side: str
     source: str = "bybit"
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, slots=True)
 class OrderFlowSnapshot:
     timestamp: datetime
     buy_volume: float | None
@@ -29,6 +31,7 @@ class OrderFlowSnapshot:
     available: bool
     reason: str | None = None
     version: str = "orderflow-v2"
+
 
 class OrderFlowEngine:
     version = "orderflow-v2"
@@ -47,34 +50,74 @@ class OrderFlowEngine:
         previous_cumulative_delta: float | None = None,
         large_trade_quantile: float = 0.90,
     ) -> OrderFlowSnapshot:
-        valid=[t for t in trades[-lookback:] if t.price>0 and t.size>0 and t.side.lower() in {"buy","sell"}]
-        if not valid:
-            return OrderFlowSnapshot(timestamp,None,None,None,cumulative_delta_base,0,None,None,None,None,None,None,False,"no valid trades")
-        buy=sum(t.size for t in valid if t.side.lower()=="buy")
-        sell=sum(t.size for t in valid if t.side.lower()=="sell")
-        total=buy+sell
-        delta=buy-sell
-        cumulative=cumulative_delta_base+delta
-        sizes=sorted(t.size for t in valid)
-        index=min(len(sizes)-1,max(0,int(round((len(sizes)-1)*large_trade_quantile))))
-        threshold=sizes[index]
-        large=sum(t.size for t in valid if t.size>=threshold)
-        span=max((valid[-1].timestamp-valid[0].timestamp).total_seconds(),1.0)
-        price_change=(valid[-1].price-previous_price)/previous_price if previous_price and previous_price>0 else None
-        cvd_change=cumulative-(previous_cumulative_delta if previous_cumulative_delta is not None else cumulative_delta_base)
-        divergence=None
-        if price_change is not None:
-            if price_change>0 and cvd_change<0:
-                divergence=-1.0
-            elif price_change<0 and cvd_change>0:
-                divergence=1.0
+        window = trades[-lookback:]
+        valid = []
+        buy = 0.0
+        sell = 0.0
+        for trade in window:
+            side = trade.side.lower()
+            if trade.price <= 0 or trade.size <= 0 or side not in {"buy", "sell"}:
+                continue
+            valid.append(trade)
+            if side == "buy":
+                buy += trade.size
             else:
-                divergence=0.0
-        large_share=large/total if total else None
-        absorption=large_share*abs(delta/total) if total else None
-        return OrderFlowSnapshot(timestamp,buy,sell,delta,cumulative,len(valid),len(valid)/span,large,large_share,delta/total if total else None,divergence,absorption,True)
+                sell += trade.size
 
-def snapshot_features(snapshot: OrderFlowSnapshot) -> dict[str,float|None]:
+        if not valid:
+            return OrderFlowSnapshot(
+                timestamp, None, None, None, cumulative_delta_base, 0,
+                None, None, None, None, None, None, False, "no valid trades",
+            )
+
+        total = buy + sell
+        delta = buy - sell
+        cumulative = cumulative_delta_base + delta
+
+        sizes = [trade.size for trade in valid]
+        sizes.sort()
+        index = min(
+            len(sizes) - 1,
+            max(0, int(round((len(sizes) - 1) * large_trade_quantile))),
+        )
+        threshold = sizes[index]
+        large = 0.0
+        for trade in valid:
+            if trade.size >= threshold:
+                large += trade.size
+
+        span = max((valid[-1].timestamp - valid[0].timestamp).total_seconds(), 1.0)
+        price_change = (
+            (valid[-1].price - previous_price) / previous_price
+            if previous_price and previous_price > 0
+            else None
+        )
+        cvd_change = cumulative - (
+            previous_cumulative_delta
+            if previous_cumulative_delta is not None
+            else cumulative_delta_base
+        )
+
+        divergence = None
+        if price_change is not None:
+            if price_change > 0 and cvd_change < 0:
+                divergence = -1.0
+            elif price_change < 0 and cvd_change > 0:
+                divergence = 1.0
+            else:
+                divergence = 0.0
+
+        large_share = large / total if total else None
+        imbalance = delta / total if total else None
+        absorption = large_share * abs(imbalance) if total else None
+        return OrderFlowSnapshot(
+            timestamp, buy, sell, delta, cumulative, len(valid),
+            len(valid) / span, large, large_share, imbalance,
+            divergence, absorption, True,
+        )
+
+
+def snapshot_features(snapshot: OrderFlowSnapshot) -> dict[str, float | None]:
     return {
         "orderflow_buy_volume": snapshot.buy_volume,
         "orderflow_sell_volume": snapshot.sell_volume,
