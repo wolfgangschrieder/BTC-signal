@@ -57,3 +57,14 @@ def test_chronological_split_purges_overlapping_outcomes():
     assert train.rows[-1].decision_time < test.rows[0].decision_time
     assert train.rows[-1].outcome_time < test.rows[0].decision_time
     assert test.skipped == 1
+
+
+
+def test_dataset_pit_audit_rejects_future_external_evidence():
+    t = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
+    candles = [candle(t, 100.0, pit=t), candle(t + timedelta(minutes=1), 101.0, pit=t + timedelta(minutes=1))]
+    future = event("future", t + timedelta(seconds=1), t + timedelta(seconds=1))
+    dataset = ResearchDatasetBuilder().build("BTCUSDT", [t], candles, external_events=[future], horizon_minutes=1)
+    assert len(dataset.rows) == 1
+    assert dataset.rows[0].external_event_ids == ()
+    assert ResearchDatasetBuilder.audit_pit(dataset, [future]) == ()
