@@ -14,6 +14,7 @@ from research_os.features.engine import FeatureEngine
 from research_os.features.orderflow import OrderFlowEngine, TradeObservation, snapshot_features
 from research_os.features.derivatives import DerivativesEngine, snapshot_features as derivatives_features
 from research_os.features.liquidity import LiquidityEngine, snapshot_features as liquidity_features
+from research_os.research.microstructure import compute_order_flow_imbalance, normalize_ofi
 from research_os.signals.guard import SignalExecutionContext
 from research_os.intelligence.analyzer import MarketAnalyzer
 from research_os.intelligence.probability import ProbabilityEngine
@@ -50,6 +51,8 @@ class LiveSignalService:
         self.orderbook=OrderBook(symbol,max_levels=50)
         self.rest=BybitRestClient()
         self._last_orderbook_update=datetime.min.replace(tzinfo=timezone.utc)
+        self._ofi_history=deque(maxlen=5000)
+        self._latest_ofi=None
         self._recovery_lock=asyncio.Lock()
         self._state_write_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
         self._outcome_write_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
@@ -108,6 +111,7 @@ class LiveSignalService:
                 self.derivatives_funding=float(event.payload["funding_rate"]) if event.payload.get("funding_rate") is not None else self.derivatives_funding
                 self.derivatives_oi=float(event.payload["open_interest"]) if event.payload.get("open_interest") is not None else self.derivatives_oi
             elif topic.startswith("orderbook."):
+                previous_book=self.orderbook.state
                 _stage_start=perf_counter()
                 quality=self.orderbook.apply(message)
                 self.latency.observe("orderbook_apply", (perf_counter()-_stage_start)*1000.0)
@@ -118,6 +122,11 @@ class LiveSignalService:
                 self._last_orderbook_update=datetime.now(timezone.utc)
                 book_state=self.orderbook.state
                 if book_state.valid and book_state.bids and book_state.asks:
+                    if previous_book.valid and previous_book.bids and previous_book.asks:
+                        raw_ofi=compute_order_flow_imbalance(previous_book,book_state,levels=5)
+                        if raw_ofi is not None:
+                            self._ofi_history.append((book_state.last_event_time_ms,raw_ofi))
+                            self._latest_ofi=(book_state.last_event_time_ms,raw_ofi)
                     now_monotonic=asyncio.get_running_loop().time()
                     if now_monotonic-self._last_liquidity_compute_monotonic >= self._liquidity_compute_interval_seconds:
                         mid=(float(book_state.bids[0].price)+float(book_state.asks[0].price))/2
@@ -174,6 +183,19 @@ class LiveSignalService:
                     self._liquidity_state=liquidity_state
                 liquidity_values=liquidity_features(liquidity_state)
                 extra.update(liquidity_values)
+                decision_ms=int(event.event_time.timestamp()*1000)
+                eligible_ofi=[item for item in self._ofi_history if item[0] <= decision_ms]
+                if eligible_ofi:
+                    ofi_ts,ofi_raw=eligible_ofi[-1]
+                    ofi_history=tuple(value for ts,value in eligible_ofi[:-1] if ts < ofi_ts)
+                    ofi_norm=normalize_ofi("bybit",datetime.fromtimestamp(ofi_ts/1000,timezone.utc),ofi_raw,ofi_history)
+                    extra.update({
+                        "orderflow_ofi_raw":ofi_raw,
+                        "orderflow_ofi_zscore":ofi_norm.zscore,
+                        "orderflow_ofi_percentile":ofi_norm.percentile,
+                        "orderflow_ofi_sample_size":float(ofi_norm.sample_size),
+                        "orderflow_ofi_available":1.0 if ofi_norm.available else 0.0,
+                    })
                 availability={key: ((flow.available and value is not None) if key.startswith("orderflow_") else (deriv.available and value is not None)) for key,value in extra.items()}
                 for key,value in liquidity_values.items(): availability[key]=liquidity_state.valid and value is not None
                 _stage_start=perf_counter()
