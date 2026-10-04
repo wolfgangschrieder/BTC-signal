@@ -32,6 +32,21 @@ def cross_market(start,end,assets):
     print({"stored":asyncio.run(run())})
     return 0
 
+def dataset(symbol,start,end,version,horizons):
+    from research_os.research.dataset_repository import ResearchDatasetRepository
+    with SessionLocal() as session:
+        total=ResearchDatasetRepository().build_resolved(
+            session,
+            dataset_version=version,
+            symbol=symbol,
+            start=datetime.fromisoformat(start) if start else None,
+            end=datetime.fromisoformat(end) if end else None,
+            horizons=tuple(int(x.strip()) for x in horizons.split(",") if x.strip()),
+        )
+        session.commit()
+    print({"dataset_version":version,"rows_inserted":total})
+    return 0
+
 def calibration(symbol,start,end):
     from research_os.research.calibration_repository import CalibrationRepository
     with SessionLocal() as session:
@@ -92,6 +107,7 @@ def main():
     st.add_argument("--compare",help="second timestamp to compare with --timestamp or current time")
     rp=sub.add_parser("replay"); rp.add_argument("--symbol",default="BTCUSDT"); rp.add_argument("--start",required=True); rp.add_argument("--end",required=True)
     cp=sub.add_parser("calibration"); cp.add_argument("--symbol",default=None); cp.add_argument("--start",default=None); cp.add_argument("--end",default=None)
+    ds=sub.add_parser("dataset"); ds.add_argument("--symbol",default=None); ds.add_argument("--start",default=None); ds.add_argument("--end",default=None); ds.add_argument("--version",default="research-dataset-v1"); ds.add_argument("--horizons",default="15,60,240")
     rg=sub.add_parser("regime"); rg.add_argument("--symbol",default="BTCUSDT"); rg.add_argument("--start",required=True); rg.add_argument("--end",required=True)
     args=parser.parse_args()
     if args.command=="health": raise SystemExit(health())
@@ -102,5 +118,6 @@ def main():
     if args.command=="cross-market": raise SystemExit(cross_market(args.start,args.end,args.assets))
     if args.command=="replay": raise SystemExit(replay(args.symbol,args.start,args.end))
     if args.command=="calibration": raise SystemExit(calibration(args.symbol,args.start,args.end))
+    if args.command=="dataset": raise SystemExit(dataset(args.symbol,args.start,args.end,args.version,args.horizons))
     if args.command=="regime": raise SystemExit(regime(args.symbol,args.start,args.end))
 if __name__=="__main__": main()
