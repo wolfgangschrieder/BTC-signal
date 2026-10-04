@@ -28,6 +28,45 @@ class CrossExchangeOFI:
     available: bool
     version: str = "multi-exchange-ofi-v1"
 
+def compute_order_flow_imbalance(previous_book, current_book, levels: int = 5) -> float | None:
+    """Compute raw top-N OFI from validated order-book states."""
+    if levels < 1:
+        raise ValueError("levels must be positive")
+    if not getattr(previous_book, "valid", False) or not getattr(current_book, "valid", False):
+        return None
+    prev_bids=list(getattr(previous_book, "bids", ()))[:levels]
+    curr_bids=list(getattr(current_book, "bids", ()))[:levels]
+    prev_asks=list(getattr(previous_book, "asks", ()))[:levels]
+    curr_asks=list(getattr(current_book, "asks", ()))[:levels]
+    if not prev_bids or not curr_bids or not prev_asks or not curr_asks:
+        return None
+
+    def side_map(items):
+        return {float(x.price): float(x.size) for x in items}
+
+    pb,cb,pa,ca=map(side_map,(prev_bids,curr_bids,prev_asks,curr_asks))
+    bid_prices=set(pb)|set(cb)
+    ask_prices=set(pa)|set(ca)
+    best_prev_bid=float(prev_bids[0].price)
+    best_curr_bid=float(curr_bids[0].price)
+    best_prev_ask=float(prev_asks[0].price)
+    best_curr_ask=float(curr_asks[0].price)
+
+    bid=0.0
+    for price in bid_prices:
+        if price >= best_curr_bid:
+            bid += cb.get(price,0.0)
+        if price <= best_prev_bid:
+            bid -= pb.get(price,0.0)
+
+    ask=0.0
+    for price in ask_prices:
+        if price <= best_curr_ask:
+            ask -= ca.get(price,0.0)
+        if price >= best_prev_ask:
+            ask += pa.get(price,0.0)
+    return bid + ask
+
 def normalize_ofi(exchange: str, timestamp, value: float, history, min_samples: int = 20, window_size: int = 252) -> NormalizedOFI:
     past=[float(x) for x in history][-window_size:]
     if len(past) < min_samples:
