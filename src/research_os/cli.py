@@ -53,7 +53,7 @@ def dataset(symbol,start,end,horizon):
             FROM world.market_state_vectors
             WHERE symbol=:symbol
               AND timestamp>=:start AND timestamp<=:end
-              AND point_in_time_available_at<=decision_time
+              AND point_in_time_available_at<=timestamp
             ORDER BY timestamp
         """),{"symbol":symbol,"start":start_dt,"end":end_dt}).mappings().all()
         features_by_time={}
