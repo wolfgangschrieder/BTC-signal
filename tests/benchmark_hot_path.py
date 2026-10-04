@@ -16,6 +16,7 @@ from research_os.pipeline.realtime import RealtimeSignalPipeline
 from research_os.notifications.telegram import TelegramFormatter
 from research_os.signals.engine import SignalEngine
 from research_os.signals.guard import SignalExecutionContext, SignalGuard
+from research_os.pipeline.latency import LatencyTelemetry
 
 
 def percentile(samples, q):
@@ -74,7 +75,8 @@ def run(iterations=20_000, warmup=1_000):
     guard = SignalGuard()
     context = SignalExecutionContext(latency_ms=1.0, spread_bps=0.1, orderbook_valid=True, orderbook_age_ms=1)
     pipeline = RealtimeSignalPipeline(
-        analyzer, probability_engine, signal_engine, TelegramFormatter(), guard
+        analyzer, probability_engine, signal_engine, TelegramFormatter(), guard,
+        latency=LatencyTelemetry(),
     )
 
     delta = {
@@ -131,7 +133,7 @@ def run(iterations=20_000, warmup=1_000):
             iterations, warmup,
         ),
         "guard": timed(lambda: guard.validate(signal, context), iterations, warmup),
-        "end_to_end": timed(
+        "state_to_guard_e2e": timed(
             lambda: pipeline.evaluate(state, closes[-1], atr, context=context),
             iterations, warmup,
         ),
@@ -142,6 +144,8 @@ def run(iterations=20_000, warmup=1_000):
         "iterations": iterations,
         "warmup": warmup,
         "python": sys.version.split()[0],
+        "scope": "synthetic state -> analysis -> probability -> signal -> guard; excludes WS receive, normalization, orderbook update, feature/state construction and cold path",
+        "target_ms": 15.0,
         "stages": stages,
     }
 
