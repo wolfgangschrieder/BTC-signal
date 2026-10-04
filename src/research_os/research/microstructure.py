@@ -29,10 +29,20 @@ class CrossExchangeOFI:
     version: str = "multi-exchange-ofi-v1"
 
 def compute_order_flow_imbalance(previous_book, current_book, levels: int = 5) -> float | None:
-    """Compute raw top-N OFI from validated order-book states."""
+    """Compute raw top-N OFI from two consecutive validated order-book states."""
     if levels < 1:
         raise ValueError("levels must be positive")
     if not getattr(previous_book, "valid", False) or not getattr(current_book, "valid", False):
+        return None
+    if getattr(previous_book, "symbol", None) != getattr(current_book, "symbol", None):
+        return None
+    previous_update_id = getattr(previous_book, "update_id", 0)
+    current_update_id = getattr(current_book, "update_id", 0)
+    if current_update_id <= previous_update_id:
+        return None
+    previous_time_ms = getattr(previous_book, "last_event_time_ms", 0)
+    current_time_ms = getattr(current_book, "last_event_time_ms", 0)
+    if previous_time_ms and current_time_ms and current_time_ms < previous_time_ms:
         return None
     prev_bids=list(getattr(previous_book, "bids", ()))[:levels]
     curr_bids=list(getattr(current_book, "bids", ()))[:levels]
