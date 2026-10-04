@@ -48,3 +48,25 @@ def test_raw_ofi_is_computed_from_top_levels_only():
 def test_raw_ofi_rejects_invalid_books():
     from research_os.research.microstructure import compute_order_flow_imbalance
     assert compute_order_flow_imbalance(None,None) is None
+
+
+def test_raw_ofi_rejects_non_consecutive_or_mismatched_books():
+    from datetime import datetime, timezone
+    from decimal import Decimal
+    from research_os.exchanges.bybit.orderbook import OrderBookLevel, OrderBookState
+    from research_os.research.microstructure import compute_order_flow_imbalance
+
+    t=int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+    def book(symbol, update_id, event_time):
+        return OrderBookState(
+            symbol,
+            (OrderBookLevel(Decimal("100"), Decimal("1")),),
+            (OrderBookLevel(Decimal("101"), Decimal("1")),),
+            update_id, None, True, event_time, "valid",
+        )
+
+    previous=book("BTCUSDT", 10, t)
+    assert compute_order_flow_imbalance(previous, book("BTCUSDT", 10, t + 1)) is None
+    assert compute_order_flow_imbalance(previous, book("ETHUSDT", 11, t + 1)) is None
+    assert compute_order_flow_imbalance(previous, book("BTCUSDT", 11, t - 1)) is None
