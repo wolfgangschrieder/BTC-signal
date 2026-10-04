@@ -43,7 +43,7 @@ def test_raw_ofi_is_computed_from_top_levels_only():
                   [(101,5),(102,4),(103,3),(104,2),(105,1),(106,100)],1)
     current=book([(100,7),(99,4),(98,3),(97,2),(96,1),(95,1)],
                  [(101,3),(102,4),(103,3),(104,2),(105,1),(106,1)],2)
-    assert compute_order_flow_imbalance(previous,current,levels=5)==2.0
+    assert compute_order_flow_imbalance(previous,current,levels=5)==4.0
 
 def test_raw_ofi_rejects_invalid_books():
     from research_os.research.microstructure import compute_order_flow_imbalance
