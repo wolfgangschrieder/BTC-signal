@@ -124,7 +124,7 @@ def test_replay_marks_same_candle_tp_and_sl_as_ambiguous():
         ReplayCandle(t+timedelta(minutes=1),100,102,98,100,1,t+timedelta(minutes=1)),
     ]
     engine=ReplayEngine(horizon_minutes=5)
-    status,outcome,ret=engine._future_outcome(signal,data,0,t)
+    status,outcome,ret=engine._future_outcome(signal,data,t)
     assert status == "ambiguous"
     assert outcome is None
     assert ret is None
@@ -198,6 +198,44 @@ def test_replay_report_exposes_ambiguous_and_unresolved_without_scoring_them():
         [ReplayCandle(t,100,100,100,100,1,t),ReplayCandle(t+timedelta(minutes=1),100,102,98,100,1,t+timedelta(minutes=1))],
         0,t,
     )
+    assert status == "ambiguous"
+    assert outcome is None
+    assert ret is None
+
+
+def test_replay_entry_gap_does_not_fill():
+    from types import SimpleNamespace
+    from research_os.signals.models import SignalDirection
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    signal=SimpleNamespace(
+        direction=SignalDirection.LONG,
+        levels=SimpleNamespace(entry_min=100.0,entry_max=100.0,stop_loss=99.0,tp1=101.0),
+    )
+    data=[
+        ReplayCandle(t,100,100,100,100,1,t),
+        ReplayCandle(t+timedelta(minutes=1),102,103,102,103,1,t+timedelta(minutes=1)),
+    ]
+    engine=ReplayEngine(horizon_minutes=5)
+    status,outcome,ret=engine._future_outcome(signal,data,t)
+    assert status == "expired"
+    assert outcome is None
+    assert ret is None
+
+
+def test_replay_short_same_candle_tp_and_sl_is_ambiguous():
+    from types import SimpleNamespace
+    from research_os.signals.models import SignalDirection
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    signal=SimpleNamespace(
+        direction=SignalDirection.SHORT,
+        levels=SimpleNamespace(entry_min=100.0,entry_max=100.0,stop_loss=101.0,tp1=99.0),
+    )
+    data=[
+        ReplayCandle(t,100,100,100,100,1,t),
+        ReplayCandle(t+timedelta(minutes=1),100,102,98,100,1,t+timedelta(minutes=1)),
+    ]
+    engine=ReplayEngine(horizon_minutes=5)
+    status,outcome,ret=engine._future_outcome(signal,data,t)
     assert status == "ambiguous"
     assert outcome is None
     assert ret is None
