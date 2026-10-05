@@ -51,26 +51,37 @@ class ReplayEngine:
         self.signal_engine=signal_engine or SignalEngine(); self.horizon_minutes=horizon_minutes
 
     def run(self,symbol:str,candles:Sequence[ReplayCandle],dataset_version="replay-v1")->ReplayReport:
+        # Event-time order is required for feature construction and future outcomes.
         rows=sorted(candles,key=lambda x:x.event_time)
-        results=[]; closes=[]; volumes=[]; highs=[]; lows=[]
-        for i,c in enumerate(rows):
-            pit=c.point_in_time_available_at or c.event_time
-            # The decision is made when this candle becomes available, not at candle event time.
-            # Never let candles whose event_time precedes this availability timestamp become
-            # part of the future outcome window: they were already observable by the decision.
-            decision_time = pit
-            available=[x for x in rows[:i+1] if (x.point_in_time_available_at or x.event_time) <= decision_time]
+        # Decision-time order is required for PIT correctness. A delayed candle can become
+        # available after later-event candles, so iterating event-time order can move the
+        # simulated clock backwards.
+        decisions=sorted(
+            ((x.point_in_time_available_at or x.event_time, x) for x in rows),
+            key=lambda item:(item[0],item[1].event_time),
+        )
+        results=[]; seen_decisions=set()
+        for decision_time, trigger in decisions:
+            if decision_time in seen_decisions:
+                continue
+            seen_decisions.add(decision_time)
+            available=[x for x in rows if (x.point_in_time_available_at or x.event_time) <= decision_time]
             closes=[x.close for x in available]
             volumes=[x.volume for x in available]
             highs=[x.high for x in available]
             lows=[x.low for x in available]
             if len(closes)<6: continue
             snap=self.features.build(symbol,decision_time,closes,volumes,highs,lows)
-            state=self.builder.build(symbol,decision_time,pit,pit,snap,{})
+            state=self.builder.build(symbol,decision_time,decision_time,decision_time,snap,{})
             analysis=self.analyzer.analyze(state); prob=self.probability.predict(analysis)
-            # Use the latest candle actually available at decision time. Using c.close here\n            # would leak the delayed candle close when its event_time precedes its PIT availability.\n            decision_price = available[-1].close\n            signal=self.signal_engine.build(analysis,prob,decision_price,next((f.value for f in snap.features if f.name == "atr_14" and f.available), None))
+            decision_price=available[-1].close
+            signal=self.signal_engine.build(
+                analysis,prob,decision_price,
+                next((f.value for f in snap.features if f.name == "atr_14" and f.available), None),
+            )
             if signal.direction is SignalDirection.NONE: continue
-            status,outcome,ret=self._future_outcome(signal,rows,i,decision_time)
+            trigger_index=rows.index(trigger)
+            status,outcome,ret=self._future_outcome(signal,rows,trigger_index,decision_time)
             results.append(ReplayResult(decision_time,signal,outcome,status,ret,dict(state.values)))
         resolved=[x for x in results if x.outcome is not None]
         wins=sum(x.outcome==1 for x in resolved if x.outcome_status=="win")
