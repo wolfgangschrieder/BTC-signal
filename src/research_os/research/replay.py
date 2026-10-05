@@ -68,7 +68,7 @@ class ReplayEngine:
             snap=self.features.build(symbol,decision_time,closes,volumes,highs,lows)
             state=self.builder.build(symbol,decision_time,pit,pit,snap,{})
             analysis=self.analyzer.analyze(state); prob=self.probability.predict(analysis)
-            signal=self.signal_engine.build(analysis,prob,c.close,next((f.value for f in snap.features if f.name == "atr_14" and f.available), None))
+            # Use the latest candle actually available at decision time. Using c.close here\n            # would leak the delayed candle close when its event_time precedes its PIT availability.\n            decision_price = available[-1].close\n            signal=self.signal_engine.build(analysis,prob,decision_price,next((f.value for f in snap.features if f.name == "atr_14" and f.available), None))
             if signal.direction is SignalDirection.NONE: continue
             status,outcome,ret=self._future_outcome(signal,rows,i,decision_time)
             results.append(ReplayResult(decision_time,signal,outcome,status,ret,dict(state.values)))
