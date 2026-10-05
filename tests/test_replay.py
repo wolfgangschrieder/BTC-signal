@@ -109,3 +109,42 @@ def test_replay_signal_price_uses_latest_pit_available_close():
     engine.run("BTCUSDT",data)
     assert capture.prices
     assert capture.prices[0] == 105.0
+
+
+def test_replay_marks_same_candle_tp_and_sl_as_ambiguous():
+    from types import SimpleNamespace
+    from research_os.signals.models import SignalDirection
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    signal=SimpleNamespace(
+        direction=SignalDirection.LONG,
+        levels=SimpleNamespace(entry_min=100.0,entry_max=100.0,stop_loss=99.0,tp1=101.0),
+    )
+    data=[
+        ReplayCandle(t,100,100,100,100,1,t),
+        ReplayCandle(t+timedelta(minutes=1),100,102,98,100,1,t+timedelta(minutes=1)),
+    ]
+    engine=ReplayEngine(horizon_minutes=5)
+    status,outcome,ret=engine._future_outcome(signal,data,0,t)
+    assert status == "ambiguous"
+    assert outcome is None
+    assert ret is None
+
+
+def test_replay_applies_fee_and_slippage_to_realized_return():
+    from types import SimpleNamespace
+    from research_os.signals.models import SignalDirection
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    signal=SimpleNamespace(
+        direction=SignalDirection.LONG,
+        levels=SimpleNamespace(entry_min=100.0,entry_max=100.0,stop_loss=99.0,tp1=101.0),
+    )
+    data=[
+        ReplayCandle(t,100,100,100,100,1,t),
+        ReplayCandle(t+timedelta(minutes=1),100,101,100,101,1,t+timedelta(minutes=1)),
+    ]
+    engine=ReplayEngine(horizon_minutes=5,fee_bps=10.0,slippage_bps=10.0)
+    status,outcome,ret=engine._future_outcome(signal,data,0,t)
+    assert status == "win"
+    assert outcome == 1
+    assert ret is not None
+    assert ret < 0.01
