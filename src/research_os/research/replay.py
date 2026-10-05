@@ -111,21 +111,32 @@ class ReplayEngine:
         if levels is None:return "expired",None,None
         end=decision_time+timedelta(minutes=self.horizon_minutes)
         raw_entry=(levels.entry_min+levels.entry_max)/2
+        filled=False
+        entry=None
         for candle in rows:
             if candle.event_time <= decision_time: continue
             if candle.event_time > end: break
+            if not filled:
+                fill=evaluate_candle(
+                    signal.direction, entry_price=raw_entry,
+                    stop_loss=levels.stop_loss, take_profit=levels.tp1,
+                    high=candle.high, low=candle.low,
+                    fee_bps=self.fee_bps, slippage_bps=self.slippage_bps,
+                    check_exit=False,
+                )
+                if fill.status is ExecutionStatus.NO_FILL: continue
+                filled=True
+                entry=fill.entry_price
+                continue
             result=evaluate_candle(
-                signal.direction, entry_price=raw_entry,
+                signal.direction, entry_price=entry,
                 stop_loss=levels.stop_loss, take_profit=levels.tp1,
                 high=candle.high, low=candle.low,
                 fee_bps=self.fee_bps, slippage_bps=self.slippage_bps,
+                check_exit=True,
             )
-            if result.status in (ExecutionStatus.NO_FILL, ExecutionStatus.PENDING):
-                continue
-            if result.status is ExecutionStatus.WIN:
-                return "win",1,result.realized_return
-            if result.status is ExecutionStatus.LOSS:
-                return "loss",0,result.realized_return
-            if result.status is ExecutionStatus.AMBIGUOUS:
-                return "ambiguous",None,None
+            if result.status in (ExecutionStatus.NO_FILL,ExecutionStatus.PENDING): continue
+            if result.status is ExecutionStatus.WIN: return "win",1,result.realized_return
+            if result.status is ExecutionStatus.LOSS: return "loss",0,result.realized_return
+            return "ambiguous",None,None
         return "expired",None,None
