@@ -239,3 +239,45 @@ def test_replay_short_same_candle_tp_and_sl_is_ambiguous():
     assert status == "ambiguous"
     assert outcome is None
     assert ret is None
+
+def test_replay_entry_candle_does_not_exit_same_candle():
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from research_os.research.replay import ReplayCandle, ReplayEngine
+    from research_os.signals.models import SignalDirection
+
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    signal=SimpleNamespace(
+        direction=SignalDirection.LONG,
+        levels=SimpleNamespace(entry_min=100.0,entry_max=100.0,stop_loss=99.0,tp1=101.0),
+    )
+    data=[
+        ReplayCandle(t,100,100,100,100,1,t),
+        ReplayCandle(t+timedelta(minutes=1),100,102,100,102,1,t+timedelta(minutes=1)),
+    ]
+    engine=ReplayEngine(horizon_minutes=2)
+    status,outcome,ret=engine._future_outcome(signal,data,t)
+    assert status=="win"
+    assert outcome==1
+    assert ret is not None
+
+def test_replay_entry_candle_with_tp_and_sl_waits_for_next_candle():
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from research_os.research.replay import ReplayCandle, ReplayEngine
+    from research_os.signals.models import SignalDirection
+
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    signal=SimpleNamespace(
+        direction=SignalDirection.LONG,
+        levels=SimpleNamespace(entry_min=100.0,entry_max=100.0,stop_loss=99.0,tp1=101.0),
+    )
+    data=[
+        ReplayCandle(t,100,100,100,100,1,t),
+        ReplayCandle(t+timedelta(minutes=1),100,102,98,100,1,t+timedelta(minutes=1)),
+    ]
+    engine=ReplayEngine(horizon_minutes=2)
+    status,outcome,ret=engine._future_outcome(signal,data,t)
+    assert status=="ambiguous"
+    assert outcome is None
+    assert ret is None
