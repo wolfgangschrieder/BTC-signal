@@ -68,3 +68,22 @@ def test_dataset_pit_audit_rejects_future_external_evidence():
     assert len(dataset.rows) == 1
     assert dataset.rows[0].external_event_ids == ()
     assert ResearchDatasetBuilder.audit_pit(dataset, [future]) == ()
+
+
+def test_dataset_accepts_delayed_pit_decision_without_event_time_match():
+    t = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
+    candles = [
+        candle(t, 100.0, pit=t),
+        candle(t + timedelta(minutes=1), 101.0, pit=t + timedelta(minutes=5)),
+        candle(t + timedelta(minutes=2), 102.0, pit=t + timedelta(minutes=2)),
+        candle(t + timedelta(minutes=3), 103.0, pit=t + timedelta(minutes=3)),
+        candle(t + timedelta(minutes=4), 104.0, pit=t + timedelta(minutes=4)),
+        candle(t + timedelta(minutes=5), 105.0, pit=t + timedelta(minutes=5)),
+        candle(t + timedelta(minutes=6), 106.0, pit=t + timedelta(minutes=6)),
+    ]
+    dataset = ResearchDatasetBuilder().build(
+        "BTCUSDT", [t + timedelta(minutes=5)], candles, horizon_minutes=1
+    )
+    assert len(dataset.rows) == 1
+    assert dataset.rows[0].decision_time == t + timedelta(minutes=5)
+    assert dataset.rows[0].entry_price == 105.0
