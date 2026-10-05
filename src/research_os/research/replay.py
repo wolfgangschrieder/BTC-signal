@@ -93,8 +93,7 @@ class ReplayEngine:
                 next((f.value for f in snap.features if f.name == "atr_14" and f.available), None),
             )
             if signal.direction is SignalDirection.NONE: continue
-            trigger_index=rows.index(trigger)
-            status,outcome,ret=self._future_outcome(signal,rows,trigger_index,decision_time)
+            status,outcome,ret=self._future_outcome(signal,rows,decision_time)
             results.append(ReplayResult(decision_time,signal,outcome,status,ret,dict(state.values)))
         resolved=[x for x in results if x.outcome is not None]
         wins=sum(x.outcome==1 for x in resolved if x.outcome_status=="win")
@@ -106,17 +105,16 @@ class ReplayEngine:
             tuple(results),len(results),len(scored),wins,losses,expired,wins/(wins+losses) if wins+losses else None,
             CalibrationMetrics.brier(samples),CalibrationMetrics.log_loss(samples))
 
-    def _future_outcome(self,signal,rows,index,decision_time=None):
+    def _future_outcome(self,signal,rows,decision_time):
         levels=signal.levels
         if levels is None:return "expired",None,None
-        decision_time=decision_time or rows[index].event_time
         end=decision_time+timedelta(minutes=self.horizon_minutes)
         raw_entry=(levels.entry_min+levels.entry_max)/2
         filled=False
         entry=None
         slip=self.slippage_bps/10000.0
         fee=self.fee_bps/10000.0
-        for c in rows[index+1:]:
+        for c in rows:
             if c.event_time <= decision_time: continue
             if c.event_time>end: break
             if not filled:
