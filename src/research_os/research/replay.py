@@ -45,10 +45,13 @@ class ReplayReport:
 
 class ReplayEngine:
     """Deterministic historical replay with a strict point-in-time information boundary."""
-    def __init__(self,feature_engine=None,builder=None,analyzer=None,probability=None,signal_engine=None,horizon_minutes=60):
+    def __init__(self,feature_engine=None,builder=None,analyzer=None,probability=None,signal_engine=None,horizon_minutes=60,fee_bps=0.0,slippage_bps=0.0):
+        if horizon_minutes <= 0: raise ValueError("horizon_minutes must be positive")
+        if fee_bps < 0 or slippage_bps < 0: raise ValueError("fee_bps and slippage_bps must be non-negative")
         self.features=feature_engine or FeatureEngine(); self.builder=builder or MarketStateBuilder()
         self.analyzer=analyzer or MarketAnalyzer(); self.probability=probability or ProbabilityEngine()
         self.signal_engine=signal_engine or SignalEngine(); self.horizon_minutes=horizon_minutes
+        self.fee_bps=fee_bps; self.slippage_bps=slippage_bps
 
     def run(self,symbol:str,candles:Sequence[ReplayCandle],dataset_version="replay-v1")->ReplayReport:
         # Event-time order is required for feature construction and future outcomes.
@@ -98,25 +101,34 @@ class ReplayEngine:
         if levels is None:return "expired",None,None
         decision_time=decision_time or rows[index].event_time
         end=decision_time+timedelta(minutes=self.horizon_minutes)
-        entry=(levels.entry_min+levels.entry_max)/2
+        raw_entry=(levels.entry_min+levels.entry_max)/2
         filled=False
+        entry=None
+        slip=self.slippage_bps/10000.0
+        fee=self.fee_bps/10000.0
         for c in rows[index+1:]:
-            if c.event_time <= decision_time:
-                continue
-            if c.event_time>end:break
+            if c.event_time <= decision_time: continue
+            if c.event_time>end: break
             if not filled:
-                if not (c.low<=entry<=c.high): continue
+                if not (c.low<=raw_entry<=c.high): continue
+                entry=raw_entry*(1+slip) if signal.direction is SignalDirection.LONG else raw_entry*(1-slip)
                 filled=True
             if signal.direction is SignalDirection.LONG:
                 hit_sl=c.low<=levels.stop_loss; hit_tp=c.high>=levels.tp1
-                if hit_sl or hit_tp:
-                    if hit_sl:
-                        return "loss",0,(levels.stop_loss-entry)/entry
-                    return "win",1,(levels.tp1-entry)/entry
+                if hit_sl and hit_tp: return "ambiguous",None,None
+                if hit_sl:
+                    exit_price=levels.stop_loss*(1-slip)
+                    return "loss",0,(exit_price-entry)/entry-2*fee
+                if hit_tp:
+                    exit_price=levels.tp1*(1-slip)
+                    return "win",1,(exit_price-entry)/entry-2*fee
             else:
                 hit_sl=c.high>=levels.stop_loss; hit_tp=c.low<=levels.tp1
-                if hit_sl or hit_tp:
-                    if hit_sl:
-                        return "loss",0,(entry-levels.stop_loss)/entry
-                    return "win",1,(entry-levels.tp1)/entry
+                if hit_sl and hit_tp: return "ambiguous",None,None
+                if hit_sl:
+                    exit_price=levels.stop_loss*(1+slip)
+                    return "loss",0,(entry-exit_price)/entry-2*fee
+                if hit_tp:
+                    exit_price=levels.tp1*(1+slip)
+                    return "win",1,(entry-exit_price)/entry-2*fee
         return "expired",None,None
