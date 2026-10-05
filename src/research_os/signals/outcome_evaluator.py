@@ -27,14 +27,15 @@ class SignalOutcomeEvaluator:
             for c in candles:
                 high=float(c["high"]); low=float(c["low"])
                 if entry is None:
-                    probe=evaluate_candle(
+                    fill=evaluate_candle(
                         s["direction"], entry_price=float(s["entry_price"]),
                         stop_loss=float(s["stop_loss"]), take_profit=float(s["tp1"]),
-                        high=high, low=low,
+                        high=high, low=low, check_exit=False,
                     )
-                    if probe.status is ExecutionStatus.NO_FILL:
+                    if fill.status is ExecutionStatus.NO_FILL:
                         continue
-                    entry=float(s["entry_price"])
+                    entry=fill.entry_price
+                    continue
                 direction=s["direction"]
                 if direction=="long":
                     best_mfe=max(best_mfe,(high-entry)/entry)
