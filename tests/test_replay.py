@@ -75,3 +75,37 @@ def test_replay_does_not_score_candles_observed_before_delayed_decision():
     first = report.results[0]
     assert first.timestamp == t + timedelta(minutes=5)
     assert first.outcome_status == "win"
+
+
+def test_replay_signal_price_uses_latest_pit_available_close():
+    from research_os.signals.models import SignalDirection
+    class CaptureSignal:
+        version = "capture"
+        def __init__(self): self.prices = []
+        def build(self, analysis, probability, price, atr):
+            self.prices.append(price)
+            class Levels:
+                entry_min = price
+                entry_max = price
+                stop_loss = price - 1
+                tp1 = price + 1
+            class Signal:
+                direction = SignalDirection.LONG
+                probability = 0.8
+                levels = Levels()
+            return Signal()
+    t = datetime(2026,1,1,tzinfo=timezone.utc)
+    data = [
+        ReplayCandle(t,100,100,100,100,1,t),
+        ReplayCandle(t+timedelta(minutes=1),101,101,101,101,1,t+timedelta(minutes=5)),
+        ReplayCandle(t+timedelta(minutes=2),102,102,102,102,1,t+timedelta(minutes=2)),
+        ReplayCandle(t+timedelta(minutes=3),103,103,103,103,1,t+timedelta(minutes=3)),
+        ReplayCandle(t+timedelta(minutes=4),104,104,104,104,1,t+timedelta(minutes=4)),
+        ReplayCandle(t+timedelta(minutes=5),105,105,105,105,1,t+timedelta(minutes=5)),
+        ReplayCandle(t+timedelta(minutes=6),106,106,106,106,1,t+timedelta(minutes=6)),
+    ]
+    capture=CaptureSignal()
+    engine=ReplayEngine(feature_engine=StubFeatures(),builder=StubBuilder(),analyzer=StubAnalyzer(),probability=StubProbability(),signal_engine=capture,horizon_minutes=1)
+    engine.run("BTCUSDT",data)
+    assert capture.prices
+    assert capture.prices[0] == 105.0
