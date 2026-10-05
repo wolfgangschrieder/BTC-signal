@@ -13,11 +13,20 @@ class SignalOutcomeRepository:
 
     def summary(self,session:Session,since:datetime)->dict:
         rows=session.execute(text("""SELECT status, count(*) FROM signal_outcomes
-        WHERE resolved_at >= :since AND status IN ('win','loss','expired')
+        WHERE resolved_at >= :since AND status IN ('win','loss','expired','ambiguous')
         GROUP BY status"""),{"since":since}).all()
-        counts={str(k):int(v) for k,v in rows}; total=sum(counts.values())
-        wins=counts.get("win",0); losses=counts.get("loss",0); expired=counts.get("expired",0)
-        return {"total":total,"wins":wins,"losses":losses,"expired":expired,"win_rate":wins/(wins+losses) if wins+losses else None}
+        counts={str(k):int(v) for k,v in rows}
+        wins=counts.get("win",0); losses=counts.get("loss",0)
+        expired=counts.get("expired",0); ambiguous=counts.get("ambiguous",0)
+        resolved=wins+losses+expired+ambiguous
+        return {
+            "total":resolved,
+            "wins":wins,
+            "losses":losses,
+            "expired":expired,
+            "ambiguous":ambiguous,
+            "win_rate":wins/(wins+losses) if wins+losses else None,
+        }
 
     def pending(self,session:Session,now:datetime):
         return session.execute(text("""SELECT signal_id,symbol,direction,signal_time,entry_price,stop_loss,tp1,tp2,tp3,probability,horizon_minutes
