@@ -107,7 +107,10 @@ class ResearchDatasetBuilder:
                 if c.event_time <= decision_time
                 and (c.point_in_time_available_at or c.event_time) <= decision_time
             )
-            if not available or available[-1].event_time != decision_time:
+            # Decision time is an information boundary, not necessarily the event time
+            # of the latest available candle. Delayed PIT data may make an older candle
+            # arrive after newer event-time candles.
+            if not available:
                 skipped += 1
                 continue
 
