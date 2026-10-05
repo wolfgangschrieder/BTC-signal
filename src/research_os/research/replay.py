@@ -55,21 +55,23 @@ class ReplayEngine:
         results=[]; closes=[]; volumes=[]; highs=[]; lows=[]
         for i,c in enumerate(rows):
             pit=c.point_in_time_available_at or c.event_time
-            # The decision is made when this candle becomes available, not at candle open.
-            # This prevents confirmed-candle close data from leaking into an earlier decision.
-            available=[x for x in rows[:i+1] if (x.point_in_time_available_at or x.event_time) <= pit]
+            # The decision is made when this candle becomes available, not at candle event time.
+            # Never let candles whose event_time precedes this availability timestamp become
+            # part of the future outcome window: they were already observable by the decision.
+            decision_time = pit
+            available=[x for x in rows[:i+1] if (x.point_in_time_available_at or x.event_time) <= decision_time]
             closes=[x.close for x in available]
             volumes=[x.volume for x in available]
             highs=[x.high for x in available]
             lows=[x.low for x in available]
             if len(closes)<6: continue
-            snap=self.features.build(symbol,c.event_time,closes,volumes,highs,lows)
-            state=self.builder.build(symbol,c.event_time,pit,pit,snap,{})
+            snap=self.features.build(symbol,decision_time,closes,volumes,highs,lows)
+            state=self.builder.build(symbol,decision_time,pit,pit,snap,{})
             analysis=self.analyzer.analyze(state); prob=self.probability.predict(analysis)
             signal=self.signal_engine.build(analysis,prob,c.close,next((f.value for f in snap.features if f.name == "atr_14" and f.available), None))
             if signal.direction is SignalDirection.NONE: continue
-            status,outcome,ret=self._future_outcome(signal,rows,i)
-            results.append(ReplayResult(c.event_time,signal,outcome,status,ret,dict(state.values)))
+            status,outcome,ret=self._future_outcome(signal,rows,i,decision_time)
+            results.append(ReplayResult(decision_time,signal,outcome,status,ret,dict(state.values)))
         resolved=[x for x in results if x.outcome is not None]
         wins=sum(x.outcome==1 for x in resolved if x.outcome_status=="win")
         losses=sum(x.outcome==0 for x in resolved if x.outcome_status=="loss")
@@ -80,13 +82,16 @@ class ReplayEngine:
             tuple(results),len(results),len(scored),wins,losses,expired,wins/(wins+losses) if wins+losses else None,
             CalibrationMetrics.brier(samples),CalibrationMetrics.log_loss(samples))
 
-    def _future_outcome(self,signal,rows,index):
+    def _future_outcome(self,signal,rows,index,decision_time=None):
         levels=signal.levels
         if levels is None:return "expired",None,None
-        end=rows[index].event_time+timedelta(minutes=self.horizon_minutes)
+        decision_time=decision_time or rows[index].event_time
+        end=decision_time+timedelta(minutes=self.horizon_minutes)
         entry=(levels.entry_min+levels.entry_max)/2
         filled=False
         for c in rows[index+1:]:
+            if c.event_time <= decision_time:
+                continue
             if c.event_time>end:break
             if not filled:
                 if not (c.low<=entry<=c.high): continue
