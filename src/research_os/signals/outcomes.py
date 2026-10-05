@@ -5,7 +5,7 @@ from enum import StrEnum
 import hashlib
 
 class OutcomeStatus(StrEnum):
-    PENDING="pending"; WIN="win"; LOSS="loss"; EXPIRED="expired"
+    PENDING="pending"; WIN="win"; LOSS="loss"; EXPIRED="expired"; AMBIGUOUS="ambiguous"
 
 @dataclass(frozen=True)
 class SignalIdentity:
