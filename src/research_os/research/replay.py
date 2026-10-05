@@ -8,6 +8,7 @@ from research_os.intelligence.analyzer import MarketAnalyzer
 from research_os.intelligence.probability import ProbabilityEngine,CalibrationSample,CalibrationMetrics
 from research_os.signals.engine import SignalEngine
 from research_os.signals.models import SignalDirection,SignalResult
+from research_os.signals.execution import ExecutionStatus,evaluate_candle
 
 @dataclass(frozen=True)
 class ReplayCandle:
@@ -110,33 +111,21 @@ class ReplayEngine:
         if levels is None:return "expired",None,None
         end=decision_time+timedelta(minutes=self.horizon_minutes)
         raw_entry=(levels.entry_min+levels.entry_max)/2
-        filled=False
-        entry=None
-        slip=self.slippage_bps/10000.0
-        fee=self.fee_bps/10000.0
-        for c in rows:
-            if c.event_time <= decision_time: continue
-            if c.event_time>end: break
-            if not filled:
-                if not (c.low<=raw_entry<=c.high): continue
-                entry=raw_entry*(1+slip) if signal.direction is SignalDirection.LONG else raw_entry*(1-slip)
-                filled=True
-            if signal.direction is SignalDirection.LONG:
-                hit_sl=c.low<=levels.stop_loss; hit_tp=c.high>=levels.tp1
-                if hit_sl and hit_tp: return "ambiguous",None,None
-                if hit_sl:
-                    exit_price=levels.stop_loss*(1-slip)
-                    return "loss",0,(exit_price-entry)/entry-2*fee
-                if hit_tp:
-                    exit_price=levels.tp1*(1-slip)
-                    return "win",1,(exit_price-entry)/entry-2*fee
-            else:
-                hit_sl=c.high>=levels.stop_loss; hit_tp=c.low<=levels.tp1
-                if hit_sl and hit_tp: return "ambiguous",None,None
-                if hit_sl:
-                    exit_price=levels.stop_loss*(1+slip)
-                    return "loss",0,(entry-exit_price)/entry-2*fee
-                if hit_tp:
-                    exit_price=levels.tp1*(1+slip)
-                    return "win",1,(entry-exit_price)/entry-2*fee
+        for candle in rows:
+            if candle.event_time <= decision_time: continue
+            if candle.event_time > end: break
+            result=evaluate_candle(
+                signal.direction, entry_price=raw_entry,
+                stop_loss=levels.stop_loss, take_profit=levels.tp1,
+                high=candle.high, low=candle.low,
+                fee_bps=self.fee_bps, slippage_bps=self.slippage_bps,
+            )
+            if result.status in (ExecutionStatus.NO_FILL, ExecutionStatus.PENDING):
+                continue
+            if result.status is ExecutionStatus.WIN:
+                return "win",1,result.realized_return
+            if result.status is ExecutionStatus.LOSS:
+                return "loss",0,result.realized_return
+            if result.status is ExecutionStatus.AMBIGUOUS:
+                return "ambiguous",None,None
         return "expired",None,None
