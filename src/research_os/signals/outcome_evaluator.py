@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from research_os.signals.outcomes import OutcomeStatus
 from research_os.signals.outcome_repository import SignalOutcomeRepository
+from research_os.signals.execution import ExecutionStatus,evaluate_candle
 
 class SignalOutcomeEvaluator:
     """Resolves live signals against future 1m OHLC candles.
@@ -24,30 +25,37 @@ class SignalOutcomeEvaluator:
             if not candles: continue
             entry=None; best_mfe=0.0; worst_mae=0.0
             for c in candles:
-                high=float(c["high"]); low=float(c["low"]); close=float(c["close"])
+                high=float(c["high"]); low=float(c["low"])
                 if entry is None:
-                    if low<=float(s["entry_price"])<=high or low<=float(s["entry_price"]) and high>=float(s["entry_price"]):
-                        entry=float(s["entry_price"])
-                    else: continue
-                direction=s["direction"]; sl=float(s["stop_loss"]); tp=float(s["tp1"])
+                    probe=evaluate_candle(
+                        s["direction"], entry_price=float(s["entry_price"]),
+                        stop_loss=float(s["stop_loss"]), take_profit=float(s["tp1"]),
+                        high=high, low=low,
+                    )
+                    if probe.status is ExecutionStatus.NO_FILL:
+                        continue
+                    entry=float(s["entry_price"])
+                direction=s["direction"]
                 if direction=="long":
-                    best_mfe=max(best_mfe,(high-entry)/entry); worst_mae=min(worst_mae,(low-entry)/entry)
-                    hit_sl=low<=sl; hit_tp=high>=tp
-                    if hit_sl and hit_tp:
-                        repo.resolve(session,s["signal_id"],OutcomeStatus.AMBIGUOUS,None,best_mfe,worst_mae,c["event_time"],"both targets touched in one candle"); resolved+=1; break
-                    if hit_sl and hit_tp:
-                        repo.resolve(session,s["signal_id"],OutcomeStatus.AMBIGUOUS,None,best_mfe,worst_mae,c["event_time"],"both targets touched in one candle"); resolved+=1; break
-                    if hit_sl or hit_tp:
-                        status=OutcomeStatus.LOSS if hit_sl else OutcomeStatus.WIN
-                        exit_price=sl if hit_sl else tp
-                        repo.resolve(session,s["signal_id"],status,(exit_price-entry)/entry,best_mfe,worst_mae,c["event_time"],"both SL and TP touched" if hit_sl and hit_tp else None); resolved+=1; break
+                    best_mfe=max(best_mfe,(high-entry)/entry)
+                    worst_mae=min(worst_mae,(low-entry)/entry)
                 else:
-                    best_mfe=max(best_mfe,(entry-low)/entry); worst_mae=min(worst_mae,(high-entry)/entry)
-                    hit_sl=high>=sl; hit_tp=low<=tp
-                    if hit_sl or hit_tp:
-                        status=OutcomeStatus.LOSS if hit_sl else OutcomeStatus.WIN
-                        exit_price=sl if hit_sl else tp
-                        repo.resolve(session,s["signal_id"],status,(entry-exit_price)/entry,best_mfe,worst_mae,c["event_time"],"both SL and TP touched" if hit_sl and hit_tp else None); resolved+=1; break
+                    best_mfe=max(best_mfe,(entry-low)/entry)
+                    worst_mae=min(worst_mae,(high-entry)/entry)
+                result=evaluate_candle(
+                    direction, entry_price=entry,
+                    stop_loss=float(s["stop_loss"]), take_profit=float(s["tp1"]),
+                    high=high, low=low,
+                )
+                if result.status in (ExecutionStatus.NO_FILL,ExecutionStatus.PENDING):
+                    continue
+                if result.status is ExecutionStatus.AMBIGUOUS:
+                    repo.resolve(session,s["signal_id"],OutcomeStatus.AMBIGUOUS,None,best_mfe,worst_mae,c["event_time"],result.reason); resolved+=1; break
+                repo.resolve(
+                    session,s["signal_id"],
+                    OutcomeStatus.WIN if result.status is ExecutionStatus.WIN else OutcomeStatus.LOSS,
+                    result.realized_return,best_mfe,worst_mae,c["event_time"],None,
+                ); resolved+=1; break
             else:
                 if now >= s["signal_time"]+timedelta(minutes=horizon):
                     repo.resolve(session,s["signal_id"],OutcomeStatus.EXPIRED,None,best_mfe,worst_mae,now,"horizon expired without TP1/SL"); resolved+=1
