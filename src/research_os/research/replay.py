@@ -43,6 +43,16 @@ class ReplayReport:
     brier: float
     log_loss: float
 
+    @property
+    def ambiguous(self) -> int:
+        """Signals whose OHLC candle cannot establish TP/SL ordering."""
+        return sum(result.outcome_status == "ambiguous" for result in self.results)
+
+    @property
+    def unresolved(self) -> int:
+        """Signals excluded from win/loss scoring (expired or ambiguous)."""
+        return sum(result.outcome is None for result in self.results)
+
 class ReplayEngine:
     """Deterministic historical replay with a strict point-in-time information boundary."""
     def __init__(self,feature_engine=None,builder=None,analyzer=None,probability=None,signal_engine=None,horizon_minutes=60,fee_bps=0.0,slippage_bps=0.0):
