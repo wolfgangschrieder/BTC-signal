@@ -35,6 +35,8 @@ class SignalOutcomeEvaluator:
                     hit_sl=low<=sl; hit_tp=high>=tp
                     if hit_sl and hit_tp:
                         repo.resolve(session,s["signal_id"],OutcomeStatus.AMBIGUOUS,None,best_mfe,worst_mae,c["event_time"],"both targets touched in one candle"); resolved+=1; break
+                    if hit_sl and hit_tp:
+                        repo.resolve(session,s["signal_id"],OutcomeStatus.AMBIGUOUS,None,best_mfe,worst_mae,c["event_time"],"both targets touched in one candle"); resolved+=1; break
                     if hit_sl or hit_tp:
                         status=OutcomeStatus.LOSS if hit_sl else OutcomeStatus.WIN
                         exit_price=sl if hit_sl else tp
