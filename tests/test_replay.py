@@ -182,3 +182,22 @@ def test_replay_can_build_decision_from_delayed_pit_candle():
     report=engine.run("BTCUSDT",data)
     assert report.results
     assert capture.prices[0] == 105.0
+
+
+def test_replay_report_exposes_ambiguous_and_unresolved_without_scoring_them():
+    from types import SimpleNamespace
+    from research_os.signals.models import SignalDirection
+    t=datetime(2026,1,1,tzinfo=timezone.utc)
+    signal=SimpleNamespace(
+        direction=SignalDirection.LONG,
+        levels=SimpleNamespace(entry_min=100.0,entry_max=100.0,stop_loss=99.0,tp1=101.0),
+    )
+    engine=ReplayEngine()
+    status,outcome,ret=engine._future_outcome(
+        signal,
+        [ReplayCandle(t,100,100,100,100,1,t),ReplayCandle(t+timedelta(minutes=1),100,102,98,100,1,t+timedelta(minutes=1))],
+        0,t,
+    )
+    assert status == "ambiguous"
+    assert outcome is None
+    assert ret is None
