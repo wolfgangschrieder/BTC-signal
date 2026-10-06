@@ -133,7 +133,7 @@ class ReplayEngine:
                 stop_loss=levels.stop_loss, take_profit=levels.tp1,
                 high=candle.high, low=candle.low,
                 fee_bps=self.fee_bps, slippage_bps=self.slippage_bps,
-                check_exit=True,
+                check_exit=True, entry_filled=True,
             )
             if result.status in (ExecutionStatus.NO_FILL,ExecutionStatus.PENDING): continue
             if result.status is ExecutionStatus.WIN: return "win",1,result.realized_return
