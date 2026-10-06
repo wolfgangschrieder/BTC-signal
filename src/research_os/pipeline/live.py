@@ -196,7 +196,7 @@ class LiveSignalService:
                         "orderflow_ofi_sample_size":float(ofi_norm.sample_size),
                         "orderflow_ofi_available":1.0 if ofi_norm.available else 0.0,
                     })
-                availability={key: ((flow.available and value is not None) if key.startswith("orderflow_") else (deriv.available and value is not None)) for key,value in extra.items()}
+                availability={key: ((ofi_norm.available and value is not None) if key.startswith("orderflow_ofi_") else (flow.available and value is not None) if key.startswith("orderflow_") else (deriv.available and value is not None)) for key,value in extra.items()}
                 for key,value in liquidity_values.items(): availability[key]=liquidity_state.valid and value is not None
                 _stage_start=perf_counter()
                 state=await self.builder.build_multi_async(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap,extra_values=extra,extra_availability=availability)
@@ -221,11 +221,12 @@ class LiveSignalService:
                 context=SignalExecutionContext(latency_ms=self.websocket.latency_ms,spread_bps=spread_bps,orderbook_valid=book_state.valid,orderbook_age_ms=age_ms,data_quality_ok=self._event_persistence_healthy)
                 clusters=tuple(liquidity_state.bid_clusters+liquidity_state.ask_clusters) if liquidity_state.valid else ()
                 signal,msg=self.pipeline.evaluate(state,price,self._atr_from_features(snap),context=context,liquidity_clusters=clusters)
-                if signal.levels is not None and signal.direction.value!="none":
+                if msg is not None and signal.levels is not None and signal.direction.value!="none":
                     try:
                         self._outcome_write_queue.put_nowait(signal)
                     except asyncio.QueueFull:
-                        pass
+                        self._event_persistence_healthy = False
+                        return
                 if msg and self.telegram:
                     self._enqueue_notification(msg.text)
         except (KeyError,ValueError,TypeError):
