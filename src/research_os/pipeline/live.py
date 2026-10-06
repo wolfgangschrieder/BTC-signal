@@ -255,12 +255,16 @@ class LiveSignalService:
             if event is self._writer_stop:
                 self._event_publish_queue.task_done()
                 return
+            success = False
             try:
                 if self.publisher:
                     await self.publisher(event)
+                success = True
+            except Exception:
+                self._event_persistence_healthy = False
             finally:
                 self._event_publish_queue.task_done()
-                if self._event_publish_queue.qsize() <= self._event_publish_queue.maxsize // 2:
+                if success and self._event_publish_queue.qsize() <= self._event_publish_queue.maxsize // 2:
                     self._event_persistence_healthy = True
 
     async def _cold_notification_writer(self) -> None:
