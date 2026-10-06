@@ -59,6 +59,8 @@ class LiveSignalService:
         self._event_publish_queue: asyncio.Queue = asyncio.Queue(maxsize=10_000)
         self._notification_queue: asyncio.Queue = asyncio.Queue()
         self._event_persistence_healthy = True
+        self._outcome_persistence_healthy = True
+        self._notification_healthy = True
         self.latency = LatencyTelemetry()
         self._writer_stop = object()
         self.features=FeatureEngine(); self.builder=MarketStateBuilder()
@@ -218,17 +220,21 @@ class LiveSignalService:
                 age_ms=None
                 if book_state.last_event_time_ms>0:
                     age_ms=max(0,int(datetime.now(timezone.utc).timestamp()*1000)-book_state.last_event_time_ms)
-                context=SignalExecutionContext(latency_ms=self.websocket.latency_ms,spread_bps=spread_bps,orderbook_valid=book_state.valid,orderbook_age_ms=age_ms,data_quality_ok=self._event_persistence_healthy)
+                context=SignalExecutionContext(latency_ms=self.websocket.latency_ms,spread_bps=spread_bps,orderbook_valid=book_state.valid,orderbook_age_ms=age_ms,data_quality_ok=(self._event_persistence_healthy and self._outcome_persistence_healthy))
                 clusters=tuple(liquidity_state.bid_clusters+liquidity_state.ask_clusters) if liquidity_state.valid else ()
-                signal,msg=self.pipeline.evaluate(state,price,self._atr_from_features(snap),context=context,liquidity_clusters=clusters)
+                signal,msg=self.pipeline.evaluate(state,price,self._atr_from_features(snap),context=context,liquidity_clusters=clusters,mark_sent=False)
                 if msg is not None and signal.levels is not None and signal.direction.value!="none":
                     try:
                         self._outcome_write_queue.put_nowait(signal)
                     except asyncio.QueueFull:
-                        self._event_persistence_healthy = False
+                        self._outcome_persistence_healthy = False
                         return
-                if msg and self.telegram:
-                    self._enqueue_notification(msg.text)
+                    if msg and self.telegram:
+                        self._enqueue_notification(msg.text)
+                    # Commit cooldown only after the signal has been accepted by
+                    # the outcome persistence queue. This prevents a dropped
+                    # outcome from consuming the signal cooldown.
+                    self.pipeline.guard.mark_sent(signal)
         except (KeyError,ValueError,TypeError):
             return
 
@@ -276,6 +282,10 @@ class LiveSignalService:
             try:
                 if self.telegram:
                     await self.telegram.send(text)
+            except Exception:
+                self._notification_healthy = False
+            else:
+                self._notification_healthy = True
             finally:
                 self._notification_queue.task_done()
 
@@ -315,7 +325,7 @@ class LiveSignalService:
                     self.states.save(session, state)
                     session.commit()
             except Exception:
-                pass
+                self._event_persistence_healthy = False
             finally:
                 self._state_write_queue.task_done()
 
@@ -338,7 +348,9 @@ class LiveSignalService:
                         self.outcomes.record_pending(session, outcome)
                         session.commit()
             except Exception:
-                pass
+                self._outcome_persistence_healthy = False
+            else:
+                self._outcome_persistence_healthy = True
             finally:
                 self._outcome_write_queue.task_done()
 
