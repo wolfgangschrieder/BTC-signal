@@ -25,3 +25,15 @@ def test_execution_applies_costs():
     assert result.status is ExecutionStatus.WIN
     assert result.realized_return is not None
     assert result.realized_return < 0.01
+
+
+def test_execution_uses_filled_entry_without_double_slippage():
+    fill=evaluate_candle(SignalDirection.LONG,entry_price=100,stop_loss=99,take_profit=101,high=100.5,low=99.5,slippage_bps=10,check_exit=False)
+    result=evaluate_candle(SignalDirection.LONG,entry_price=fill.entry_price,stop_loss=99,take_profit=101,high=101,low=100.5,slippage_bps=10,entry_filled=True)
+    assert fill.entry_price==100.1
+    assert result.status is ExecutionStatus.WIN
+    assert result.entry_price==100.1
+
+def test_execution_filled_entry_checks_exit_without_touching_entry():
+    result=evaluate_candle(SignalDirection.LONG,entry_price=100,stop_loss=99,take_profit=101,high=101,low=100.5,entry_filled=True)
+    assert result.status is ExecutionStatus.WIN
