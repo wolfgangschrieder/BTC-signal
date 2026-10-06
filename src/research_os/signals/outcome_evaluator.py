@@ -46,7 +46,7 @@ class SignalOutcomeEvaluator:
                 result=evaluate_candle(
                     direction, entry_price=entry,
                     stop_loss=float(s["stop_loss"]), take_profit=float(s["tp1"]),
-                    high=high, low=low,
+                    high=high, low=low, entry_filled=True,
                 )
                 if result.status in (ExecutionStatus.NO_FILL,ExecutionStatus.PENDING):
                     continue
