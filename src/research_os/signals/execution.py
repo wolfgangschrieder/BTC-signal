@@ -46,7 +46,6 @@ def evaluate_candle(direction, *, entry_price, stop_loss, take_profit, high, low
             exit_price=take_profit*(1-slip)
             return ExecutionResult(ExecutionStatus.WIN,entry,(exit_price-entry)/entry-2*fee)
     else:
-        entry=entry_price*(1-slip)
         hit_sl=high>=stop_loss
         hit_tp=low<=take_profit
         if hit_sl and hit_tp:
