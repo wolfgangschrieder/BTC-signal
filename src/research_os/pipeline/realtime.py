@@ -18,27 +18,40 @@ class RealtimeSignalPipeline:
     guard: SignalGuard
     latency: LatencyTelemetry | None = None
 
-    def evaluate(self, state: MarketStateVector, price: float, atr: float|None, context: SignalExecutionContext|None=None, liquidity_clusters: tuple[LiquidityCluster,...]=()):
+    def evaluate(
+        self,
+        state: MarketStateVector,
+        price: float,
+        atr: float | None,
+        context: SignalExecutionContext | None = None,
+        liquidity_clusters: tuple[LiquidityCluster, ...] = (),
+        mark_sent: bool = True,
+    ):
         if self.latency is None:
-            analysis=self.analyzer.analyze(state)
-            probability=self.probability.predict(analysis)
-            signal=self.signal.build(analysis,probability,price,atr,liquidity_clusters=liquidity_clusters)
-            allowed=self.guard.allow(signal,context)
+            analysis = self.analyzer.analyze(state)
+            probability = self.probability.predict(analysis)
+            signal = self.signal.build(
+                analysis, probability, price, atr, liquidity_clusters=liquidity_clusters
+            )
+            allowed = self.guard.allow(signal, context)
         else:
             with self.latency.timer("analysis"):
-                analysis=self.analyzer.analyze(state)
+                analysis = self.analyzer.analyze(state)
             with self.latency.timer("probability"):
-                probability=self.probability.predict(analysis)
+                probability = self.probability.predict(analysis)
             with self.latency.timer("signal"):
-                signal=self.signal.build(analysis,probability,price,atr,liquidity_clusters=liquidity_clusters)
+                signal = self.signal.build(
+                    analysis, probability, price, atr, liquidity_clusters=liquidity_clusters
+                )
             with self.latency.timer("guard"):
-                allowed=self.guard.allow(signal,context)
+                allowed = self.guard.allow(signal, context)
 
-        message=None
+        message = None
         if allowed:
-            message=self.formatter.format(signal)
-            # Guard cooldown is stateful policy, so a successful emission must
-            # atomically advance its suppression state in the same pipeline that
-            # performed validation. Previously mark_sent() was never called.
-            self.guard.mark_sent(signal)
-        return signal,message
+            message = self.formatter.format(signal)
+            # Some callers need to persist/queue the emission before committing
+            # the stateful cooldown. LiveSignalService uses this to avoid consuming
+            # cooldown when the outcome queue is already full.
+            if mark_sent:
+                self.guard.mark_sent(signal)
+        return signal, message
