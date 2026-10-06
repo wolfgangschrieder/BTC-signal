@@ -9,7 +9,7 @@ def test_live_entry_candle_only_fills():
 
 def test_live_next_candle_resolves_after_fill():
     fill=evaluate_candle(SignalDirection.LONG,entry_price=100,stop_loss=99,take_profit=101,high=102,low=99,check_exit=False)
-    result=evaluate_candle(SignalDirection.LONG,entry_price=fill.entry_price,stop_loss=99,take_profit=101,high=101,low=100)
+    result=evaluate_candle(SignalDirection.LONG,entry_price=fill.entry_price,stop_loss=99,take_profit=101,high=101,low=100,entry_filled=True)
     assert result.status is ExecutionStatus.WIN
 
 def test_live_entry_gap_does_not_fill():
