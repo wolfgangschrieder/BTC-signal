@@ -16,21 +16,25 @@ class ExecutionResult:
     realized_return: float|None=None
     reason: str|None=None
 
-def evaluate_candle(direction, *, entry_price, stop_loss, take_profit, high, low, fee_bps=0.0, slippage_bps=0.0, check_exit=True):
+def evaluate_candle(direction, *, entry_price, stop_loss, take_profit, high, low, fee_bps=0.0, slippage_bps=0.0, check_exit=True, entry_filled=False):
     if entry_price<=0 or stop_loss<=0 or take_profit<=0:
         raise ValueError("prices must be positive")
     if fee_bps<0 or slippage_bps<0:
         raise ValueError("fees and slippage must be non-negative")
     direction=SignalDirection(direction)
-    if not (low<=entry_price<=high):
-        return ExecutionResult(ExecutionStatus.NO_FILL)
     slip=slippage_bps/10000.0
     fee=fee_bps/10000.0
-    if not check_exit:
+    if not entry_filled:
+        if not (low<=entry_price<=high):
+            return ExecutionResult(ExecutionStatus.NO_FILL)
         entry=entry_price*(1+slip) if direction is SignalDirection.LONG else entry_price*(1-slip)
+        if not check_exit:
+            return ExecutionResult(ExecutionStatus.PENDING,entry)
+    else:
+        entry=entry_price
+    if not check_exit and entry_filled:
         return ExecutionResult(ExecutionStatus.PENDING,entry)
     if direction is SignalDirection.LONG:
-        entry=entry_price*(1+slip)
         hit_sl=low<=stop_loss
         hit_tp=high>=take_profit
         if hit_sl and hit_tp:
