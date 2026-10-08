@@ -21,3 +21,17 @@ async def test_ingestion_persists_selected_assets():
     total=await service.fetch_and_store(object(),assets=("SPX","VIX"))
     assert total==2
     assert [x.asset for x in repo.saved]==["SPX","VIX"]
+
+
+@pytest.mark.asyncio
+async def test_fred_date_bounds_exclude_time_component():
+    calls = []
+
+    class Provider(FakeProvider):
+        async def fetch_series(self, asset, series_id, observation_start=None, observation_end=None):
+            calls.append((observation_start, observation_end))
+            return []
+
+    await CrossMarketIngestionService(Provider(), FakeRepository()).fetch_and_store(
+        object(), datetime(2026, 1, 1, 12), datetime(2026, 1, 5, 18), ('SPX',))
+    assert calls == [('2026-01-01', '2026-01-05')]

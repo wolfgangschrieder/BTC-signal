@@ -6,7 +6,7 @@ from research_os.market.state_vector import MarketStateVector
 
 class MarketAnalyzer:
     """Converts available MSV features into auditable evidence; no probability is produced."""
-    version="analysis-v2"
+    version="analysis-v3"
 
     def __init__(self, minority_ratio: float = 0.25):
         if not 0 <= minority_ratio < 1:
@@ -93,6 +93,13 @@ class MarketAnalyzer:
         vol=state.values.get("realized_vol")
         if vol is not None:
             add("realized_vol", EvidenceDirection.NEUTRAL, vol, min(vol / 0.02, 1), "volatility is state information, not direction")
+
+        for asset in ("DOLLAR_BROAD", "SPX", "NASDAQ", "VIX", "US10Y"):
+            name = f"cross_market_{asset}_return"
+            value = state.values.get(name)
+            if value is not None:
+                add(name, EvidenceDirection.NEUTRAL, value, 0.0,
+                    "change between last two reported macro observations; contextual, unvalidated for BTC direction")
 
         bull=sum(e.strength * e.reliability for e in ev if e.direction is EvidenceDirection.BULLISH)
         bear=sum(e.strength * e.reliability for e in ev if e.direction is EvidenceDirection.BEARISH)

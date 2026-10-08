@@ -28,3 +28,28 @@ async def test_fred_provider_preserves_acquisition_pit(monkeypatch):
 def test_fred_provider_requires_key():
     with pytest.raises(ValueError):
         FREDProvider("")
+
+
+@pytest.mark.asyncio
+async def test_fred_pit_starts_after_decoding_response(monkeypatch):
+    from datetime import UTC, datetime
+    import research_os.cross_market.providers as module
+    received = False
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 9, 0, 1 if received else 0, tzinfo=UTC)
+
+    original_json = FakeResponse.json
+
+    def decoded(self):
+        nonlocal received
+        received = True
+        return original_json(self)
+
+    monkeypatch.setattr(module, 'datetime', Clock)
+    monkeypatch.setattr(FakeResponse, 'json', decoded)
+    monkeypatch.setattr(module.httpx, 'AsyncClient', lambda **kwargs: FakeClient())
+    result = await FREDProvider('test-key').fetch_series('VIX', 'VIXCLS')
+    assert result[0].point_in_time_available_at == datetime(2026, 10, 9, 0, 1, tzinfo=UTC)

@@ -23,7 +23,6 @@ class FREDProvider:
         params={"series_id":series_id,"api_key":self.api_key,"file_type":"json","sort_order":"asc"}
         if observation_start: params["observation_start"]=observation_start
         if observation_end: params["observation_end"]=observation_end
-        fetched_at=datetime.now(timezone.utc)
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response=await client.get(FRED_URL,params=params)
@@ -31,6 +30,8 @@ class FREDProvider:
                 payload=response.json()
         except (httpx.HTTPError,ValueError) as exc:
             raise CrossMarketProviderError(f"FRED request failed for {series_id}") from exc
+        # Availability starts after the response is fully received and decoded.
+        fetched_at=datetime.now(timezone.utc)
         observations=[]
         for item in payload.get("observations",[]):
             raw=item.get("value")
