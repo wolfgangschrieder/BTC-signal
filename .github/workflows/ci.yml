@@ -35,5 +35,11 @@ jobs:
       - run: alembic heads
       - run: alembic upgrade head
       - run: pytest -q
+      - name: Non-root storage volume probe
+        run: |
+          probe_dir=$(mktemp -d)
+          chmod 700 "$probe_dir"
+          docker run --rm --user 10001:10001 --mount "type=bind,src=$probe_dir,dst=/postgres-storage,readonly" python:3.12-slim-bookworm python -c "import shutil; assert shutil.disk_usage('/postgres-storage').free > 0"
+          rmdir "$probe_dir"
       - name: Hot-path benchmark smoke
         run: python tests/benchmark_hot_path.py --iterations 200 --warmup 50

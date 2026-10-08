@@ -62,7 +62,7 @@ python3 deploy/configure-telegram.py
 
 После прогрева каждый расчёт сигнала записывает диагностическую строку `Signal evaluation` в журнал app: направление анализа, достаточность данных, некалиброванные оценки long/short/no-signal, ATR и причины отказа движка/guard. Посмотрите их через `docker compose --env-file deploy/.env -f deploy/compose.yml logs --tail 100 app`. Строка `allowed=True` означает прохождение фильтров расчёта, а не подтверждённую запись outcome или доставку Telegram. Настройка токена при выключенной отправке не создаёт outcomes сама по себе.
 
-Для VPS с диском 28 ГБ Compose по умолчанию устанавливает `RAW_RETENTION_HOURS=6`. Каждую минуту приложение удаляет до 20 порций по 1000 сырых событий Bybit типов trade/ticker/orderbook_update/orderbook_snapshot, полученных более 6 часов назад, вместе с fingerprint и нормализованными строками сделок, тикеров и стакана. Каждая порция выполняется одной транзакцией. Очистка использует время получения, а не биржевое время: поздно полученные события не удаляются сразу. Миграция 0013 создаёт индекс для очистки без блокировки записи. Свечи, funding/open interest/liquidations, состояния рынка, outcomes и outbox не удаляются. Значение 0 выключает очистку; вне deploy по умолчанию очистка отключена.
+Для VPS с диском 28 ГБ Compose по умолчанию устанавливает `RAW_RETENTION_HOURS=6`. Каждую минуту приложение удаляет до 20 порций по 1000 сырых событий Bybit типов trade/ticker/orderbook_update/orderbook_snapshot, полученных более 6 часов назад, вместе с fingerprint и нормализованными строками сделок, тикеров и стакана. Каждая порция выполняется одной транзакцией. Очистка использует время получения, а не биржевое время: поздно полученные события не удаляются сразу. Миграция 0013 создаёт индекс для очистки без блокировки записи. Свечи, отдельные события funding/open interest/liquidations, состояния рынка, outcomes и outbox не удаляются. Funding/open interest, созданные из удаляемых тикеров, удаляются вместе с ними. Значение 0 выключает очистку; вне deploy по умолчанию очистка отключена.
 
 После удаления старые подробные события недоступны для replay и проверки происхождения сохранённых состояний; для долговременного исследования нужен внешний архив. Удаление освобождает место для повторного использования PostgreSQL, но не гарантирует немедленное уменьшение файлов базы. Не запускайте VACUUM FULL на работающем боте. Ограничение по времени не является жёсткой квотой в ГБ: при росте потока, сбоях очистки, росте сохранённых данных, WAL или Docker-образов диск всё ещё может заполниться. `bash deploy/status.sh` теперь показывает свободное место и размер базы. Проверяйте их ежедневно; держите минимум 5 ГБ свободными. Очистка не заменяет внешнюю резервную копию свечей и результатов.
 
@@ -73,3 +73,34 @@ docker compose --env-file deploy/.env -f deploy/compose.yml exec -T app python -
 ```
 
 Отчёт показывает период выборки, направления и причины анализа, медиану/p90/максимум направленной оценки, количество кандидатов выше 0.70 и доступность признаков. Это пересчёт текущей моделью, а не исторический replay: кандидаты ещё должны пройти проверки ATR, риск-уровней и live guard. Прибыльность, вероятность успеха и калибровка здесь не измеряются. Команда не записывает outcomes и не отправляет сообщения.
+
+
+### Storage guard for a 28 GB disk
+
+Compose enables a startup check and a check every 10 seconds against the actual
+PostgreSQL volume (mounted read-only in the app). Defaults are decimal **18 GB
+maximum database size** and **5 GB minimum free filesystem space**. WAL, other
+images, logs and other databases consume the free-space reserve even though they
+are not counted by `pg_database_size`. An inaccessible volume or database probe
+fails closed. Set `STORAGE_MAX_DATABASE_GB` and `STORAGE_MIN_FREE_GB` in deploy/.env.
+Outside Compose the guard requires an explicit `STORAGE_PATH` on the database filesystem;
+leave it empty only when storage is managed separately.
+
+A failed check stops live ingestion and the runtime. The writer checks the blocked
+flag before each transaction. Docker retries startup, but cannot resume ingestion
+until both checks pass. This is a protective threshold, **not a hard disk quota**:
+writes between checks, in-flight transactions, migrations, other commands and
+other processes may still use space. Migrations run before the app guard, so check
+free space before deploying. Retention does not run while startup is blocked;
+operator intervention is needed. Do not automatically VACUUM FULL on a nearly
+full disk: it needs additional working space. Delete expired disposable data and
+unused Docker images safely, or move storage, then verify the volume reserve.
+
+The six-hour policy now also deletes funding/open-interest rows attached to the
+expired high-frequency raw events. This bounds per-ticker duplicates; **their
+long-term ticker-derived history is no longer preserved**. Standalone funding/OI
+events, candles and research results are preserved. Rows orphaned by older retention
+runs are not retroactively deleted by this migration; quantify those separately
+before an intentional cleanup. Historical research data, outcomes and states still
+grow, so the guard can eventually stop the service even with retention working.
+For ongoing monitoring run `deploy/status.sh`; keep backups off this disk.

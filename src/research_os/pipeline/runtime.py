@@ -11,6 +11,7 @@ from research_os.pipeline.live import LiveSignalService
 from research_os.pipeline.retention import RetentionScheduler
 from research_os.pipeline.outcome_scheduler import OutcomeResolutionScheduler
 from research_os.pipeline.statistics_scheduler import StatisticsScheduler
+from research_os.pipeline.storage import StorageBudget
 from research_os.signals.guard import SignalGuard
 
 
@@ -24,7 +25,12 @@ async def run():
         if notifications_enabled
         else None
     )
-    ingestion = IngestionPipeline()
+    storage = None
+    if getattr(settings, "storage_path", ""):
+        storage = StorageBudget(settings.storage_path, settings.storage_max_database_gb,
+                                settings.storage_min_free_gb)
+        await asyncio.to_thread(storage.check)
+    ingestion = IngestionPipeline(storage_budget=storage) if storage else IngestionPipeline()
     stop = asyncio.Event()
     guard = SignalGuard(
         max_latency_ms=settings.signal_guard_max_latency_ms,
@@ -48,7 +54,10 @@ async def run():
         RetentionScheduler(retention_hours).run(stop) if retention_hours else stop.wait(),
         name="retention",
     )
-    tasks = (writer, live, statistics, outcomes, retention)
+    storage_task = asyncio.create_task(
+        storage.run(stop) if storage else stop.wait(), name="storage-budget"
+    )
+    tasks = (writer, live, statistics, outcomes, retention, storage_task)
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         # Propagate background failures immediately, rather than leaving live running.
@@ -63,6 +72,7 @@ async def run():
         statistics.cancel()
         outcomes.cancel()
         retention.cancel()
+        storage_task.cancel()
         try:
             await asyncio.wait_for(asyncio.shield(live), timeout=10)
         except TimeoutError:
@@ -72,10 +82,10 @@ async def run():
             logging.getLogger(__name__).exception("Live service failed during shutdown")
         finally:
             stop.set()
-            for task in (live, statistics, outcomes, retention):
+            for task in (live, statistics, outcomes, retention, storage_task):
                 if not task.done():
                     task.cancel()
-            await asyncio.gather(live, statistics, outcomes, retention, return_exceptions=True)
+            await asyncio.gather(live, statistics, outcomes, retention, storage_task, return_exceptions=True)
             try:
                 await asyncio.wait_for(asyncio.shield(writer), timeout=10)
             except TimeoutError:

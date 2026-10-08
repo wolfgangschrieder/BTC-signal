@@ -29,7 +29,14 @@ def test_retention_deletes_related_rows_but_preserves_recent_and_candles():
             session.execute(text("""INSERT INTO market.trades
                 (event_time,ingestion_time,point_in_time_available_at,symbol,source,raw_event_id,price,size,side)
                 VALUES (:ts,:ts,:ts,'RETENTIONTEST','bybit',:id,100,1,'buy')"""), {'ts': old, 'id': ids[0]})
+            for table, field in [('funding_rates', 'funding_rate'), ('open_interest', 'open_interest')]:
+                session.execute(text(f"""INSERT INTO derivatives.{table}
+                    (event_time,ingestion_time,point_in_time_available_at,symbol,source,raw_event_id,{field})
+                    VALUES (:ts,:ts,:ts,'RETENTIONTEST','bybit',:id,1)"""), {'ts': old, 'id': ids[0]})
             assert prune_batch(session, now-timedelta(hours=6)) >= 1
+            for table in ('funding_rates', 'open_interest'):
+                assert session.execute(text(f'SELECT count(*) FROM derivatives.{table} WHERE raw_event_id=:id'),
+                                       {'id': ids[0]}).scalar() == 0
             remaining = set(session.execute(text('SELECT id FROM raw.events WHERE id = ANY(:ids)'), {'ids': ids}).scalars())
             assert remaining == set(ids[1:])
             assert session.execute(text('SELECT count(*) FROM market.trades WHERE raw_event_id=:id'), {'id': ids[0]}).scalar() == 0
