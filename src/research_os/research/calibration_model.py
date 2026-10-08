@@ -154,6 +154,12 @@ class CalibrationArtifact(ArtifactSchema):
     ) -> None:
         if model_id != self.model_id:
             raise ValueError("calibration artifact checksum mismatch")
+        policy = AcceptanceGates().model_dump()
+        for name, value in self.gates.model_dump().items():
+            if (name.startswith("min_") and value < policy[name]) or (
+                name.startswith("max_") and value > policy[name]
+            ):
+                raise ValueError("calibration artifact weakens live acceptance policy")
         reasons = self.rejection_reasons()
         if reasons:
             raise ValueError("calibration rejected: " + "; ".join(reasons))

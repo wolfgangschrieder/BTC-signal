@@ -263,3 +263,22 @@ def test_registry_routes_both_directions_and_rejects_duplicate_models(artifact):
     assert registry.predict(bearish).model_id == short.model_id
     with pytest.raises(ValueError, match="duplicate"):
         FrozenCalibrationRegistry([long_engine, long_engine])
+
+
+def test_live_loader_cannot_weaken_acceptance_gates_or_change_threshold(artifact):
+    weakened = artifact.model_copy(
+        update={"gates": artifact.gates.model_copy(update={"max_ece": 0.9})}
+    )
+    with pytest.raises(ValueError, match="weakens"):
+        weakened.validate_for_live(
+            weakened.model_id, "BTCUSDT", "test-context", artifact.created_at
+        )
+    with pytest.raises(ValueError, match="threshold mismatch"):
+        FrozenCalibratedProbabilityEngine(
+            artifact,
+            model_id=artifact.model_id,
+            symbol="BTCUSDT",
+            context_id="test-context",
+            now=artifact.created_at,
+            decision_threshold=0.8,
+        )

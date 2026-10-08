@@ -20,7 +20,10 @@ class FrozenCalibratedProbabilityEngine:
         context_id: str,
         max_age_days: int = 30,
         now: datetime | None = None,
+        decision_threshold: float | None = None,
     ):
+        if decision_threshold is not None and artifact.decision_threshold != decision_threshold:
+            raise ValueError("calibration decision threshold mismatch")
         artifact.validate_for_live(
             model_id, symbol, context_id, now or datetime.now(UTC), max_age_days
         )

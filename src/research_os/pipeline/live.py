@@ -470,6 +470,7 @@ class LiveSignalService:
                 engines.append(FrozenCalibratedProbabilityEngine(
                     artifact, model_id=model_id, symbol=self.symbol,
                     context_id=self.calibration_context, max_age_days=self._calibration_max_age_days,
+                    decision_threshold=self.pipeline.signal.min_probability,
                 ))
         self.pipeline.probability = FrozenCalibrationRegistry(engines)
 
