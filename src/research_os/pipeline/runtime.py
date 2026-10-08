@@ -8,6 +8,7 @@ from research_os.core.config import get_settings
 from research_os.data.pipeline import IngestionPipeline
 from research_os.notifications.telegram_client import TelegramClient
 from research_os.pipeline.live import LiveSignalService
+from research_os.pipeline.outcome_scheduler import OutcomeResolutionScheduler
 from research_os.pipeline.statistics_scheduler import StatisticsScheduler
 from research_os.signals.guard import SignalGuard
 
@@ -40,7 +41,8 @@ async def run():
     statistics = asyncio.create_task(
         scheduler.run(stop) if telegram is not None else stop.wait(), name="statistics-scheduler"
     )
-    tasks = (writer, live, statistics)
+    outcomes = asyncio.create_task(OutcomeResolutionScheduler().run(stop), name="outcome-resolver")
+    tasks = (writer, live, statistics, outcomes)
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         # Propagate background failures immediately, rather than leaving live running.
@@ -53,6 +55,7 @@ async def run():
         await service.stop()
         # Stop producers before asking the ingestion writer to drain and exit.
         statistics.cancel()
+        outcomes.cancel()
         try:
             await asyncio.wait_for(asyncio.shield(live), timeout=10)
         except TimeoutError:
@@ -62,10 +65,10 @@ async def run():
             logging.getLogger(__name__).exception("Live service failed during shutdown")
         finally:
             stop.set()
-            for task in (live, statistics):
+            for task in (live, statistics, outcomes):
                 if not task.done():
                     task.cancel()
-            await asyncio.gather(live, statistics, return_exceptions=True)
+            await asyncio.gather(live, statistics, outcomes, return_exceptions=True)
             try:
                 await asyncio.wait_for(asyncio.shield(writer), timeout=10)
             except TimeoutError:

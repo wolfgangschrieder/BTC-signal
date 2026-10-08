@@ -26,6 +26,8 @@ async def _run_runtime_with_writer_failure(monkeypatch, notifications_enabled):
     started = asyncio.Event()
     stopped = asyncio.Event()
     scheduler_stopped = asyncio.Event()
+    outcomes_started = asyncio.Event()
+    outcomes_stopped = asyncio.Event()
 
     class Pipeline:
         async def publish(self, event):
@@ -57,6 +59,14 @@ async def _run_runtime_with_writer_failure(monkeypatch, notifications_enabled):
             finally:
                 scheduler_stopped.set()
 
+    class Outcomes:
+        async def run(self, stop):
+            outcomes_started.set()
+            try:
+                await stop.wait()
+            finally:
+                outcomes_stopped.set()
+
     settings = SimpleNamespace(
         telegram_bot_token="test" if notifications_enabled else "",
         telegram_chat_id="test" if notifications_enabled else "",
@@ -74,9 +84,12 @@ async def _run_runtime_with_writer_failure(monkeypatch, notifications_enabled):
     monkeypatch.setattr(runtime, "IngestionPipeline", Pipeline)
     monkeypatch.setattr(runtime, "LiveSignalService", Service)
     monkeypatch.setattr(runtime, "StatisticsScheduler", Scheduler)
+    monkeypatch.setattr(runtime, "OutcomeResolutionScheduler", Outcomes)
     with pytest.raises(RuntimeError, match="database outage"):
         await asyncio.wait_for(runtime.run(), timeout=1)
     assert stopped.is_set()
+    assert outcomes_started.is_set()
+    assert outcomes_stopped.is_set()
     assert scheduler_stopped.is_set() == notifications_enabled
 
 

@@ -6,14 +6,13 @@ from zoneinfo import ZoneInfo
 from research_os.database.session import SessionLocal
 from research_os.notifications.telegram_client import TelegramClient
 from research_os.notifications.statistics import StatisticsReporter
-from research_os.signals.outcome_evaluator import SignalOutcomeEvaluator
 
 logger=logging.getLogger(__name__)
 
 class StatisticsScheduler:
     def __init__(self,telegram:TelegramClient,timezone_name="Europe/Moscow",hour=20,minute=0):
         self.telegram=telegram; self.tz=ZoneInfo(timezone_name); self.hour=hour; self.minute=minute
-        self.evaluator=SignalOutcomeEvaluator(); self.reporter=StatisticsReporter(timezone_name)
+        self.reporter=StatisticsReporter(timezone_name)
     def _next(self,now):
         target=now.replace(hour=self.hour,minute=self.minute,second=0,microsecond=0)
         return target if target>now else target+timedelta(days=1)
@@ -27,7 +26,6 @@ class StatisticsScheduler:
             weekly=datetime.now(self.tz).weekday()==6
             try:
                 with SessionLocal() as session:
-                    self.evaluator.resolve_pending(session,datetime.now(self.tz))
                     daily=self.reporter.daily(session)
                     weekly_text=self.reporter.weekly(session) if weekly else None
                 await self.telegram.send(daily)

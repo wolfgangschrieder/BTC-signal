@@ -67,4 +67,6 @@ database records success can cause a duplicate. The signal ID identifies the
 notification; Telegram sendMessage does not provide an idempotency key. Pending
 committed messages survive runtime restarts. Signals that fail the initial database
 transaction are not sent, and new signal emission is blocked by persistence health.
-Statistics reports still use their separate scheduled delivery path.
+Statistics reports still use their separate scheduled delivery path. Research outcomes
+are resolved independently every 60 seconds, including when Telegram is disabled.
+Use `bash deploy/status.sh` on the VPS to inspect data/state lag and outcome counts.
