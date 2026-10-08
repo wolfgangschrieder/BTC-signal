@@ -17,8 +17,8 @@ class CrossMarketIngestionService:
                 raise ValueError(f"unknown FRED cross-market asset: {asset}")
             observations=await self.provider.fetch_series(
                 asset,series_id,
-                observation_start=start.isoformat() if start else None,
-                observation_end=end.isoformat() if end else None,
+                observation_start=start.date().isoformat() if start else None,
+                observation_end=end.date().isoformat() if end else None,
             )
             for observation in observations:
                 self.repository.save(session,observation)

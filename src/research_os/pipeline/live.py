@@ -32,6 +32,7 @@ from research_os.pipeline.realtime import RealtimeSignalPipeline
 from research_os.database.session import SessionLocal
 from research_os.market.state_repository import MarketStateRepository
 from research_os.pipeline.latency import LatencyTelemetry
+from research_os.pipeline.macro_context import LiveMacroContext
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,12 @@ class LiveSignalService:
 
     def __init__(self,symbol="BTCUSDT",interval="1",publisher:EventPublisher|None=None,telegram:TelegramClient|None=None,config=None,guard:SignalGuard|None=None,settings=None):
         signal_settings = settings or config
+        self.macro_context = LiveMacroContext(
+            getattr(signal_settings, "cross_market_refresh_seconds", 60),
+            getattr(signal_settings, "cross_market_cache_max_age_seconds", 120),
+            getattr(signal_settings, "cross_market_max_event_age_days", 7),
+        ) if getattr(signal_settings, "cross_market_enabled", False) else None
+        self._macro_stop = asyncio.Event()
         self._calibration_model_ids = tuple(x.strip() for x in str(getattr(signal_settings, "calibration_model_ids", "")).split(",") if x.strip())
         self._calibration_max_age_days = int(getattr(signal_settings, "calibration_max_age_days", 30))
         history_size = int(getattr(signal_settings, "live_history_minutes", 10080))
@@ -94,7 +101,12 @@ class LiveSignalService:
         self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),signal_engine,TelegramFormatter(),guard_instance,self.latency)
         from research_os.research.calibration_model import digest
         self.calibration_context = digest({
-            "pipeline": "live-calibration-provenance-v1", "symbol": symbol, "interval": interval,
+            "pipeline": "live-calibration-provenance-v2",
+            "macro_context": {"version": self.macro_context.version,
+                              "refresh_seconds": self.macro_context.refresh_seconds,
+                              "cache_max_age_seconds": self.macro_context.cache_max_age_seconds,
+                              "max_event_age_days": self.macro_context.max_event_age_days}
+                             if self.macro_context else None, "symbol": symbol, "interval": interval,
             "analysis_version": self.pipeline.analyzer.version, "minority_ratio": self.pipeline.analyzer.minority_ratio,
             "probability_version": self.pipeline.probability.version,
             "min_directional_score": self.pipeline.probability.min_directional_score,
@@ -269,8 +281,16 @@ class LiveSignalService:
                     })
                 availability={key: ((ofi_norm.available and value is not None) if key.startswith("orderflow_ofi_") else (flow.available and value is not None) if key.startswith("orderflow_") else (deriv.available and value is not None)) for key,value in extra.items()}
                 for key,value in liquidity_values.items(): availability[key]=liquidity_state.valid and value is not None
+                macro_quality = {}
+                state_pit = event.point_in_time_available_at
+                if self.macro_context is not None:
+                    macro_values, macro_availability, macro_quality = self.macro_context.features(event.event_time, now)
+                    extra.update(macro_values)
+                    availability.update(macro_availability)
+                    if any(macro_availability.values()):
+                        state_pit = max(state_pit, datetime.fromisoformat(macro_quality["cross_market_cache_loaded_at"]))
                 _stage_start=perf_counter()
-                state=await self.builder.build_multi_async(self.symbol,event.event_time,now,event.point_in_time_available_at,mtf_snapshot,base_snapshot=snap,extra_values=extra,extra_availability=availability)
+                state=await self.builder.build_multi_async(self.symbol,event.event_time,now,state_pit,mtf_snapshot,base_snapshot=snap,extra_values=extra,extra_availability=availability,data_quality=macro_quality)
                 self.latency.observe("state_build", (perf_counter()-_stage_start)*1000.0)
                 self.previous_derivatives_price=float(event.payload["close"])
                 self.previous_funding=self.derivatives_funding
@@ -484,6 +504,7 @@ class LiveSignalService:
         state_writer=asyncio.create_task(self._cold_writer())
         outcome_writer=asyncio.create_task(self._cold_outcome_writer())
         watchdog = None
+        macro_worker = asyncio.create_task(self.macro_context.run(self._macro_stop)) if self.macro_context else None
         try:
             await self.bootstrap_derivatives_history()
             await self.bootstrap_orderbook()
@@ -492,6 +513,10 @@ class LiveSignalService:
         finally:
             workers=(state_writer,outcome_writer,event_writer,notification_writer)
             try:
+                self._macro_stop.set()
+                if macro_worker is not None:
+                    macro_worker.cancel()
+                    await asyncio.gather(macro_worker, return_exceptions=True)
                 if watchdog is not None:
                     watchdog.cancel()
                     await asyncio.gather(watchdog,return_exceptions=True)
@@ -505,7 +530,7 @@ class LiveSignalService:
                 await asyncio.gather(*workers,return_exceptions=True)
             finally:
                 self._notification_stop.set()
-                cleanup = (*workers, *((watchdog,) if watchdog is not None else ()))
+                cleanup = (*workers, *((watchdog,) if watchdog is not None else ()), *((macro_worker,) if macro_worker is not None else ()))
                 for worker in cleanup:
                     if not worker.done():
                         worker.cancel()

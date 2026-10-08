@@ -104,3 +104,41 @@ runs are not retroactively deleted by this migration; quantify those separately
 before an intentional cleanup. Historical research data, outcomes and states still
 grow, so the guard can eventually stop the service even with retention working.
 For ongoing monitoring run `deploy/status.sh`; keep backups off this disk.
+
+
+### Optional live macro context
+
+`CROSS_MARKET_ENABLED=true` connects live analysis to existing FRED observations
+in PostgreSQL. It does not start a network collector or ingest news. Sources are
+pinned to `DEFAULT_FRED_SERIES`: broad dollar (not DXY), SPX, NASDAQ, VIX, US10Y.
+The cold worker reads at most two distinct dates per asset within 14 days every
+60 seconds. Returned rows exclude future event dates and future availability;
+same-date revisions use the latest vintage known at load time. The cache is
+replaced atomically, never accumulated, and cleared on database failures.
+
+A cache older than 120 seconds, a cache loaded after a decision, or a latest
+observation older than seven days is unavailable. Defaults tolerate daily reports
+and weekends; these are daily reported observations, not real-time market quotes.
+Returns compare the last two reported dates, not necessarily consecutive days.
+The US10Y feature is relative yield change, not a bond price return. Missing macro
+data does not veto the independent BTC analysis. Available macro evidence is
+neutral with zero directional strength and cannot increase a probability score.
+The MSV stores each pair's source, times, PIT availability and values in data-quality
+metadata covered by the fingerprint. No original payloads or extra history are
+copied; this adds a small bounded amount to the existing state records, whose
+long-term growth remains subject to the storage guard.
+
+Populate a short explicit date range with the existing command, for example:
+
+```bash
+docker compose --env-file deploy/.env -f deploy/compose.yml exec -T app \
+  research-os cross-market --start 2026-10-01 --end 2026-10-08 --assets SPX,NASDAQ,VIX,DOLLAR_BROAD,US10Y
+```
+
+Configure `FRED_API_KEY` for that command. Availability is recorded after the
+response is received and decoded; newly fetched historical data cannot support
+backdated decisions. Fetching is manual; an empty database leaves context unavailable.
+Calibration context and analyzer versions change in this release. Previously pinned
+models must be refitted and re-evaluated for the new context, even though macro
+features do not change the directional score. No real source feed or server has
+been validated by the synthetic/integration tests.

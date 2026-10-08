@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     report_timezone:str="Europe/Moscow"; report_hour:int=20; report_minute:int=0
     fred_api_key:str=""
     cross_market_enabled:bool=False
+    cross_market_refresh_seconds:int=Field(default=60,ge=10)
+    cross_market_cache_max_age_seconds:int=Field(default=120,ge=10)
+    cross_market_max_event_age_days:int=Field(default=7,ge=1,le=14)
     cross_market_max_event_skew_seconds:float=300.0
     cross_market_max_source_latency_skew_seconds:float=30.0
 @lru_cache
