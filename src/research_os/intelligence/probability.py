@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from math import exp, log
+from math import exp, log, isfinite
 from research_os.intelligence.models import AnalysisResult, EvidenceDirection
 
 @dataclass(frozen=True)
@@ -11,22 +11,26 @@ class ProbabilityResult:
     short: float
     no_signal: float
     model_version: str = "probability-v1"
+    calibrated: bool = False
 
 class ProbabilityEngine:
     """Transparent evidence-to-probability mapping. Not a calibrated production model yet."""
     version="probability-v1"
     def __init__(self, min_directional_score: float = 0.15, temperature: float = 1.0):
-        if min_directional_score < 0 or temperature <= 0: raise ValueError("invalid probability parameters")
+        if not isfinite(min_directional_score) or not isfinite(temperature) or min_directional_score < 0 or temperature <= 0: raise ValueError("invalid probability parameters")
         self.min_directional_score=min_directional_score
         self.temperature=temperature
 
     def predict(self, analysis: AnalysisResult) -> ProbabilityResult:
-        b=max(0.0, analysis.bullish_score); s=max(0.0, analysis.bearish_score)
+        if not all(isfinite(x) and x >= 0 for x in (analysis.bullish_score, analysis.bearish_score)):
+            raise ValueError("evidence scores must be finite and non-negative")
+        b=analysis.bullish_score; s=analysis.bearish_score
         if not analysis.sufficient_data or (b+s) < self.min_directional_score or analysis.direction is EvidenceDirection.CONFLICTING:
             return ProbabilityResult(analysis.symbol,analysis.timestamp,0.0,0.0,1.0,self.version)
         # Softmax over directional evidence, with an explicit abstention mass.
         scale=max(self.temperature,1e-12)
-        eb=exp(b/scale); es=exp(s/scale)
+        peak=max(b/scale, s/scale)
+        eb=exp(b/scale-peak); es=exp(s/scale-peak)
         raw=eb+es
         directional=min(0.95, max(0.0, (b+s)/(b+s+1.0)))
         return ProbabilityResult(analysis.symbol,analysis.timestamp,

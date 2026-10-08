@@ -18,6 +18,7 @@ class FeatureEngine:
         highs: Sequence[float] = (),
         lows: Sequence[float] = (),
         orderbook=None,
+        as_of: datetime | None = None,
     ) -> FeatureSnapshot:
         """Build deterministic features with bounded allocations for the live hot path."""
         values: list[FeatureValue] = []
@@ -110,7 +111,7 @@ class FeatureEngine:
             event_ms = getattr(orderbook, "last_event_time_ms", 0)
             age_ms = None
             if event_ms:
-                age_ms = max(0, int(timestamp.timestamp() * 1000) - int(event_ms))
+                age_ms = max(0, int((as_of or timestamp).timestamp() * 1000) - int(event_ms))
             fresh = bool(getattr(orderbook, "valid", False)) and age_ms is not None and age_ms <= 5000
             if fresh and orderbook.bids and orderbook.asks:
                 best_bid = float(orderbook.bids[0].price)

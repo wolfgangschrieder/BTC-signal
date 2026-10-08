@@ -15,9 +15,11 @@ class SignalOutcomeEvaluator:
 
     signal_time is the decision time, never the source candle open time.
     Only candles opening strictly after that decision can fill an entry;
-    the entry candle cannot also resolve TP/SL.
+    new conservative policies flag an entry candle touching TP/SL as ambiguous.
+    Historical signals retain their persisted execution policy and costs.
 
-    Entry is considered filled when candle range touches the entry zone.
+    Entry is modeled as a limit at the persisted entry-zone midpoint.
+    It is not a market-order or arbitrary-zone-fill simulation.
     If SL and TP1 are both touched in the same OHLC candle, the outcome is ambiguous because
     intrabar ordering is unknowable from OHLC data.
     """
@@ -38,9 +40,15 @@ class SignalOutcomeEvaluator:
                         s["direction"], entry_price=float(s["entry_price"]),
                         stop_loss=float(s["stop_loss"]), take_profit=float(s["tp1"]),
                         high=high, low=low, check_exit=False,
+                        fee_bps=s.get("fee_bps",0), slippage_bps=s.get("slippage_bps",0),
+                        conservative_entry=s.get("execution_policy") == "conservative-midpoint-v2",
                     )
                     if fill.status is ExecutionStatus.NO_FILL:
                         continue
+                    if fill.status is ExecutionStatus.AMBIGUOUS:
+                        repo.resolve(session,s["signal_id"],OutcomeStatus.AMBIGUOUS,None,best_mfe,worst_mae,c["event_time"],fill.reason)
+                        resolved+=1
+                        break
                     entry=fill.entry_price
                     continue
                 direction=s["direction"]
@@ -54,6 +62,7 @@ class SignalOutcomeEvaluator:
                     direction, entry_price=entry,
                     stop_loss=float(s["stop_loss"]), take_profit=float(s["tp1"]),
                     high=high, low=low, entry_filled=True,
+                    fee_bps=s.get("fee_bps",0), slippage_bps=s.get("slippage_bps",0),
                 )
                 if result.status in (ExecutionStatus.NO_FILL,ExecutionStatus.PENDING):
                     continue

@@ -6,7 +6,12 @@ from research_os.market.state_vector import MarketStateVector
 
 class MarketAnalyzer:
     """Converts available MSV features into auditable evidence; no probability is produced."""
-    version="analysis-v1"
+    version="analysis-v2"
+
+    def __init__(self, minority_ratio: float = 0.25):
+        if not 0 <= minority_ratio < 1:
+            raise ValueError("minority_ratio must be between 0 and 1")
+        self.minority_ratio = minority_ratio
 
     def analyze(self, state: MarketStateVector) -> AnalysisResult:
         ev=[]
@@ -97,7 +102,7 @@ class MarketAnalyzer:
 
         if not bullish and not bearish:
             direction=EvidenceDirection.NEUTRAL
-        elif has_conflict:
+        elif has_conflict and min(bull, bear) > self.minority_ratio * max(bull, bear):
             direction=EvidenceDirection.CONFLICTING
         else:
             direction=EvidenceDirection.BULLISH if bull > bear else EvidenceDirection.BEARISH
@@ -110,6 +115,8 @@ class MarketAnalyzer:
             if not sufficient
             else "conflicting directional evidence"
             if direction is EvidenceDirection.CONFLICTING
+            else "dominant directional evidence; minority evidence retained"
+            if has_conflict
             else "directional evidence aggregated from available features"
         )
         return AnalysisResult(

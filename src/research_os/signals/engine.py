@@ -6,9 +6,14 @@ from research_os.signals.risk import RiskEngine, LiquidityLevel
 from research_os.features.liquidity import LiquidityCluster
 
 class SignalEngine:
-    version="signal-v1"
+    version="signal-v2"
 
-    def __init__(self, risk: RiskEngine | None = None, min_probability: float = .70, min_rr: float = 1.5):
+    def __init__(self, risk: RiskEngine | None = None, min_probability: float = .70, min_rr: float = 1.5, fee_bps: float = 0.0, slippage_bps: float = 0.0, require_calibrated_probability: bool = False):
+        if fee_bps < 0 or slippage_bps < 0:
+            raise ValueError("execution costs must be non-negative")
+        self.fee_bps=fee_bps
+        self.slippage_bps=slippage_bps
+        self.require_calibrated_probability=require_calibrated_probability
         self.risk=risk or RiskEngine()
         self.min_probability=min_probability
         self.min_rr=min_rr
@@ -16,6 +21,13 @@ class SignalEngine:
     def build(self, analysis: AnalysisResult, probability: ProbabilityResult, price: float, atr: float | None = None, liquidity_levels: tuple[LiquidityLevel,...] = (), liquidity_clusters: tuple[LiquidityCluster,...] = ()) -> SignalResult:
         if price <= 0:
             raise ValueError("price must be positive")
+
+        if self.require_calibrated_probability and not probability.calibrated:
+            return SignalResult(
+                analysis.symbol, analysis.timestamp, SignalDirection.NONE, 0.0,
+                probability.no_signal, None, 0.0, 1.0,
+                ("validated calibration required for production emission",), (), self.version,
+            )
 
         direction=SignalDirection.NONE
         p=0.0
@@ -58,13 +70,14 @@ class SignalEngine:
                 ("TP1 risk/reward below policy threshold",),(),self.version
             )
 
-        ev=p*rr1-(1-p)
+        cost_r = 2 * (self.fee_bps + self.slippage_bps) / 10000 * price / risk
+        ev=p*rr1-(1-p)-cost_r
         lev=self.risk.recommended_leverage(price,stop,p)
         return SignalResult(
             analysis.symbol,analysis.timestamp,direction,p,probability.no_signal,
             SignalLevels(entry_min,entry_max,stop,t1,t2,t3,rr1,rr2,rr3),
             ev,lev,
             tuple(e.reason for e in analysis.evidence if e.direction.value == direction.value and e.reason),
-            (f"stop source: {levels.stop_source}","market structure may change before entry"),
-            self.version,
+            (f"stop source: {levels.stop_source}","market structure may change before entry", "EV assumes binary TP1/SL resolution; expiry is not priced", *(() if probability.calibrated else ("uncalibrated research score; not a measured success probability",))),
+            self.version, probability_is_calibrated=probability.calibrated,
         )

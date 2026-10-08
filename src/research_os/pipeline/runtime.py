@@ -33,7 +33,7 @@ async def run():
         min_probability=settings.signal_min_probability,
         min_expected_value=settings.signal_min_ev,
     )
-    service = LiveSignalService(telegram=telegram, publisher=ingestion.publish, guard=guard)
+    service = LiveSignalService(telegram=telegram, publisher=ingestion.publish, guard=guard, settings=settings)
     scheduler = StatisticsScheduler(
         telegram, settings.report_timezone, settings.report_hour, settings.report_minute
     )

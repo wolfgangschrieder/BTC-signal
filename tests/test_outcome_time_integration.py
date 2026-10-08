@@ -27,7 +27,7 @@ def db():
     engine.dispose()
 
 
-def pending(db, decision, direction="long"):
+def pending(db, decision, direction="long", **assumptions):
     outcome = SignalOutcome(
         "time-boundary-audit",
         "AUDIT-TIME-BTC",
@@ -41,6 +41,7 @@ def pending(db, decision, direction="long"):
         0.8,
         OutcomeStatus.PENDING,
         horizon_minutes=10,
+        **assumptions,
     )
     SignalOutcomeRepository().record_pending(db, outcome)
     return outcome
@@ -74,12 +75,13 @@ def status(db):
 
 
 @pytest.mark.parametrize("direction", ["long", "short"])
-def test_delayed_decision_excludes_existing_candles_and_matches_replay(db, direction):
+@pytest.mark.parametrize("policy,expected", [("legacy-entry-only", "win"), ("conservative-midpoint-v2", "ambiguous")])
+def test_delayed_decision_excludes_existing_candles_and_matches_replay(db, direction, policy, expected):
     from types import SimpleNamespace
 
     t = datetime(2026, 1, 1, tzinfo=UTC)
     decision = t + timedelta(minutes=1, milliseconds=100)
-    outcome = pending(db, decision, direction)
+    outcome = pending(db, decision, direction, execution_policy=policy)
     candles = [
         store_candle(db, t, 102, 98),
         store_candle(db, t + timedelta(minutes=1), 102, 98),
@@ -92,7 +94,7 @@ def test_delayed_decision_excludes_existing_candles_and_matches_replay(db, direc
         ),
     ]
     assert SignalOutcomeEvaluator().resolve_pending(db, t + timedelta(minutes=5)) == 1
-    assert status(db) == "win"
+    assert status(db) == expected
     signal = SimpleNamespace(
         direction=SignalDirection(direction),
         levels=SimpleNamespace(
@@ -102,11 +104,11 @@ def test_delayed_decision_excludes_existing_candles_and_matches_replay(db, direc
             tp1=outcome.tp1,
         ),
     )
-    replay_status, score, _ = ReplayEngine(horizon_minutes=10)._future_outcome(
+    replay_status, score, _ = ReplayEngine(horizon_minutes=10, conservative_entry=policy != "legacy-entry-only")._future_outcome(
         signal, candles, decision
     )
     assert replay_status == status(db)
-    assert score == 1
+    assert score == (1 if expected == "win" else None)
 
 
 def test_outcome_waits_for_delayed_candle_availability(db):
@@ -128,3 +130,28 @@ def test_empty_future_remains_pending_then_expires(db):
     assert status(db) == "pending"
     assert evaluator.resolve_pending(db, t + timedelta(minutes=10)) == 1
     assert status(db) == "expired"
+
+
+@pytest.mark.parametrize("policy,expected", [("legacy-entry-only", "win"), ("conservative-midpoint-v2", "ambiguous")])
+def test_persisted_execution_policy_controls_entry_bar(db, policy, expected):
+    t = datetime(2026, 1, 1, tzinfo=UTC)
+    pending(db, t, execution_policy=policy, fee_bps=10, slippage_bps=5)
+    store_candle(db, t+timedelta(minutes=1), 102, 98)
+    store_candle(db, t+timedelta(minutes=2), 102, 100)
+    SignalOutcomeEvaluator().resolve_pending(db, t+timedelta(minutes=4))
+    assert status(db) == expected
+    row = db.execute(text("SELECT fee_bps,slippage_bps,execution_policy,realized_return FROM signal_outcomes WHERE signal_id='time-boundary-audit'")).mappings().one()
+    assert row["fee_bps"] == 10 and row["slippage_bps"] == 5
+    assert row["execution_policy"] == policy
+    if expected == "win":
+        assert row["realized_return"] < .01
+    else:
+        assert row["realized_return"] is None
+
+
+def test_committed_cooldown_restore_query_returns_latest_per_direction(db):
+    t = datetime(2026, 1, 1, tzinfo=UTC)
+    pending(db, t)
+    db.execute(text("UPDATE signal_outcomes SET signal_time=:time WHERE signal_id='time-boundary-audit'"), {"time":t+timedelta(minutes=5)})
+    rows = SignalOutcomeRepository().latest_emissions(db, "AUDIT-TIME-BTC")
+    assert len(rows) == 1 and rows[0]["signal_time"] == t+timedelta(minutes=5)
