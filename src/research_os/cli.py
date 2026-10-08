@@ -109,6 +109,35 @@ def calibration(symbol,start,end):
     print({"samples":report.samples,"brier":report.brier,"log_loss":report.log_loss,"ece":report.expected_calibration_error,"mce":report.max_calibration_error,"buckets":[{"lower":b.lower,"upper":b.upper,"samples":b.samples,"predicted":b.predicted_mean,"actual":b.actual_rate,"error":b.calibration_error} for b in report.buckets]})
     return 0
 
+def calibration_fit(symbol, direction):
+    from datetime import UTC
+    from research_os.pipeline.live import LiveSignalService
+    from research_os.research.calibration_model import fit_artifact
+    from research_os.research.calibration_model_repository import CalibrationModelRepository
+
+    service = LiveSignalService(symbol=symbol, settings=get_settings())
+    now = datetime.now(UTC)
+    repository = CalibrationModelRepository()
+    with SessionLocal() as session:
+        rows = repository.load_samples(session, symbol=symbol, direction=direction,
+                                       context_id=service.calibration_context, as_of=now)
+        try:
+            artifact = fit_artifact(rows, symbol=symbol, direction=direction,
+                                    context_id=service.calibration_context, now=now,
+                                    decision_threshold=service.pipeline.signal.min_probability)
+        except ValueError as error:
+            print({"accepted":False,"eligible_samples":len(rows),"reason":str(error),
+                   "context_id":service.calibration_context})
+            return 2
+        model_id = repository.save(session, artifact)
+        session.commit()
+    reasons = artifact.rejection_reasons()
+    print({"model_id":model_id,"accepted":not reasons,"target":artifact.target,
+           "train":artifact.train.samples,"validation":artifact.validation.samples,
+           "test":artifact.test.samples,"metrics":artifact.metrics.model_dump(),"reasons":reasons})
+    return 2 if reasons else 0
+
+
 def regime(symbol,start,end):
     from research_os.research.replay_repository import ReplayRepository
     from research_os.research.regimes import RegimeAnalyzer
@@ -162,6 +191,7 @@ def main():
     st.add_argument("--compare",help="second timestamp to compare with --timestamp or current time")
     rp=sub.add_parser("replay"); rp.add_argument("--symbol",default="BTCUSDT"); rp.add_argument("--start",required=True); rp.add_argument("--end",required=True)
     cp=sub.add_parser("calibration"); cp.add_argument("--symbol",default=None); cp.add_argument("--start",default=None); cp.add_argument("--end",default=None)
+    fit=sub.add_parser("calibration-fit"); fit.add_argument("--symbol",default="BTCUSDT"); fit.add_argument("--direction",required=True,choices=("long","short"))
     ds=sub.add_parser("dataset"); ds.add_argument("--symbol",default="BTCUSDT"); ds.add_argument("--start",required=True); ds.add_argument("--end",required=True); ds.add_argument("--horizon",default="60")
     rg=sub.add_parser("regime"); rg.add_argument("--symbol",default="BTCUSDT"); rg.add_argument("--start",required=True); rg.add_argument("--end",required=True)
     args=parser.parse_args()
@@ -172,6 +202,7 @@ def main():
         live_main()
     if args.command=="cross-market": raise SystemExit(cross_market(args.start,args.end,args.assets))
     if args.command=="replay": raise SystemExit(replay(args.symbol,args.start,args.end))
+    if args.command=="calibration-fit": raise SystemExit(calibration_fit(args.symbol,args.direction))
     if args.command=="calibration": raise SystemExit(calibration(args.symbol,args.start,args.end))
     if args.command=="dataset": raise SystemExit(dataset(args.symbol,args.start,args.end,args.horizon))
     if args.command=="regime": raise SystemExit(regime(args.symbol,args.start,args.end))

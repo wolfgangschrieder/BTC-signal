@@ -18,7 +18,7 @@ class TelegramFormatter:
         assert s is not None
         why="\n".join(f"• {x}" for x in signal.rationale if x) or "• validated directional evidence"
         risks="\n".join(f"• {x}" for x in signal.risks if x) or "• market conditions can change"
-        probability_label = "Calibrated probability" if signal.probability_is_calibrated else "Research score (uncalibrated)"
+        probability_label = "Calibrated TP1 success estimate" if signal.probability_is_calibrated else "Research score (uncalibrated)"
         return TelegramMessage(
             f"{icon} {signal.symbol} {signal.direction.value.upper()}\n\n"
             f"{probability_label}: {signal.probability:.0%}\nLeverage: {signal.leverage:g}x\n\n"

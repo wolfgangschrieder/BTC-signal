@@ -6,7 +6,7 @@ from research_os.signals.risk import RiskEngine, LiquidityLevel
 from research_os.features.liquidity import LiquidityCluster
 
 class SignalEngine:
-    version="signal-v2"
+    version="signal-v3"
 
     def __init__(self, risk: RiskEngine | None = None, min_probability: float = .70, min_rr: float = 1.5, fee_bps: float = 0.0, slippage_bps: float = 0.0, require_calibrated_probability: bool = False):
         if fee_bps < 0 or slippage_bps < 0:
@@ -78,6 +78,8 @@ class SignalEngine:
             SignalLevels(entry_min,entry_max,stop,t1,t2,t3,rr1,rr2,rr3),
             ev,lev,
             tuple(e.reason for e in analysis.evidence if e.direction.value == direction.value and e.reason),
-            (f"stop source: {levels.stop_source}","market structure may change before entry", "EV assumes binary TP1/SL resolution; expiry is not priced", *(() if probability.calibrated else ("uncalibrated research score; not a measured success probability",))),
-            self.version, probability_is_calibrated=probability.calibrated,
+            (f"stop source: {levels.stop_source}","market structure may change before entry", "EV is a binary payoff proxy; fees/slippage are assumptions, funding/gaps are unmodeled", *(("target: confirmed TP1 within horizon; expired/ambiguous count as non-success",) if probability.calibrated else ("uncalibrated research score; not a measured success probability",))),
+            self.version+":"+probability.model_version, probability_is_calibrated=probability.calibrated,
+            research_score=probability.research_score if probability.research_score is not None else p,
+            probability_model_id=probability.model_id, probability_target=probability.target,
         )

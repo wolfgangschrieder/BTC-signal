@@ -12,6 +12,9 @@ class ProbabilityResult:
     no_signal: float
     model_version: str = "probability-v1"
     calibrated: bool = False
+    research_score: float | None = None
+    model_id: str | None = None
+    target: str = "uncalibrated-evidence-score"
 
 class ProbabilityEngine:
     """Transparent evidence-to-probability mapping. Not a calibrated production model yet."""

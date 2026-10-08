@@ -7,9 +7,9 @@ from research_os.signals.outcomes import OutcomeStatus, SignalOutcome
 class SignalOutcomeRepository:
     def record_pending(self,session:Session,outcome:SignalOutcome)->None:
         session.execute(text("""INSERT INTO signal_outcomes
-        (signal_id,symbol,direction,signal_time,entry_price,stop_loss,tp1,tp2,tp3,probability,status,horizon_minutes,reason,fee_bps,slippage_bps,execution_policy)
-        VALUES (:id,:symbol,:direction,:time,:entry,:sl,:tp1,:tp2,:tp3,:prob,:status,:horizon,:reason,:fee,:slippage,:policy)
-        ON CONFLICT (signal_id) DO NOTHING"""),dict(id=outcome.signal_id,symbol=outcome.symbol,direction=outcome.direction, time=outcome.signal_time,entry=outcome.entry_price,sl=outcome.stop_loss,tp1=outcome.tp1,tp2=outcome.tp2,tp3=outcome.tp3,prob=outcome.probability,status=outcome.status.value,horizon=outcome.horizon_minutes,reason=outcome.reason,fee=outcome.fee_bps,slippage=outcome.slippage_bps,policy=outcome.execution_policy))
+        (signal_id,symbol,direction,signal_time,entry_price,stop_loss,tp1,tp2,tp3,probability,status,horizon_minutes,reason,fee_bps,slippage_bps,execution_policy,research_score,probability_model_id,calibration_context)
+        VALUES (:id,:symbol,:direction,:time,:entry,:sl,:tp1,:tp2,:tp3,:prob,:status,:horizon,:reason,:fee,:slippage,:policy,:score,:model_id,:context)
+        ON CONFLICT (signal_id) DO NOTHING"""),dict(id=outcome.signal_id,symbol=outcome.symbol,direction=outcome.direction, time=outcome.signal_time,entry=outcome.entry_price,sl=outcome.stop_loss,tp1=outcome.tp1,tp2=outcome.tp2,tp3=outcome.tp3,prob=outcome.probability,status=outcome.status.value,horizon=outcome.horizon_minutes,reason=outcome.reason,fee=outcome.fee_bps,slippage=outcome.slippage_bps,policy=outcome.execution_policy,score=outcome.research_score,model_id=outcome.probability_model_id,context=outcome.calibration_context))
 
     def latest_emissions(self, session: Session, symbol: str):
         return session.execute(text("""SELECT symbol,direction,max(signal_time) AS signal_time
