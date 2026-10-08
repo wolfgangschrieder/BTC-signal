@@ -1,0 +1,51 @@
+# Развёртывание на VPS
+
+Требуются Linux x86_64, Docker Engine и Docker Compose v2. SSH-пароли, bot token и реальные `.env` не включаются в образ и репозиторий.
+
+Из каталога проекта:
+
+```bash
+cp deploy/env.example deploy/.env
+chmod 600 deploy/.env
+# В редакторе замените POSTGRES_PASSWORD случайной hex-строкой:
+# openssl rand -hex 32
+# Настоящие секреты вводятся только на сервере.
+docker compose --env-file deploy/.env -f deploy/compose.yml build
+docker compose --env-file deploy/.env -f deploy/compose.yml up -d
+```
+
+По умолчанию `SIGNAL_EMISSION_ENABLED=false`: бот принимает публичные данные, хранит market states и исследовательские outcomes, но не создаёт Telegram-клиент и не отправляет сообщения. Не переключайте true до приёмки качества данных, калибровки и риск-параметров. Для уведомлений нужны TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID. Режим наблюдения не требует ключей Bybit.
+
+Миграции выполняются отдельным контейнером до запуска приложения. PostgreSQL доступен только внутри Docker-сети; публичный порт БД не публикуется. Приложение работает от непривилегированного UID. Логи ограничены по размеру.
+
+Проверки:
+
+```bash
+docker compose --env-file deploy/.env -f deploy/compose.yml ps -a
+docker compose --env-file deploy/.env -f deploy/compose.yml exec app research-os health
+docker compose --env-file deploy/.env -f deploy/compose.yml logs --tail 100 app
+```
+
+`health` проверяет только БД. Дополнительно нужно проверить поступление raw.events, market.candles и world.market_state_vectors, отсутствие непрерывных reconnect/ошибок, лаг данных и пропуски. Для этого нужны доступ VPS к api.bybit.com и stream.bybit.com по HTTPS/WSS. При включении уведомлений требуется api.telegram.org.
+
+При разрыве соединения стакан становится недействительным, история окна очищается и признаки прогреваются заново. Повреждённый trade batch блокирует выдачу новых сигналов до перезапуска. Успешные unit tests не заменяют длительную проверку реального потока.
+
+Обновление: сначала сделайте резервную копию БД, затем пересоберите образ и выполните `up -d`. Не используйте `down -v`: это удалит историю.
+
+Пример резервной копии (хранить вне репозитория, с правами 600):
+
+```bash
+umask 077
+docker compose --env-file deploy/.env -f deploy/compose.yml exec -T postgres pg_dump -U research_os -Fc research_os > research_os.dump
+```
+
+Проверка восстановления и внешнее хранение резервных копий обязательны до постоянного запуска. Для обновления установленных версий используйте deploy/constraints.txt; текущие ограничения отражают версии, проверенные в облачной среде. Образ и стек пока должны отдельно пройти проверку на целевом VPS.
+
+Для сервера можно подготовить комплект с готовыми Python wheels, чтобы сборка приложения не зависела от доступа VPS к PyPI:
+
+```bash
+BTC_BUILD_PYTHON=.venv/bin/python ./deploy/package-release.sh
+# Передайте dist/btc-signal-release на VPS и выполните команды выше из его корня.
+```
+
+Контрольные суммы wheels проверяются при сборке release-образа. Docker всё ещё должен получить базовые образы из реестра. Локально проверены: установка wheel, запуск от UID 10001, все миграции на чистой TimescaleDB, health и pg_dump/pg_restore структуры БД. Восстановление большого набора реальных рыночных данных ещё не проверено.

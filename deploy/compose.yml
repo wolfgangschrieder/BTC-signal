@@ -1,0 +1,52 @@
+name: btc-signal-shadow
+services:
+  postgres:
+    image: timescale/timescaledb:2.30.2-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: research_os
+      POSTGRES_USER: research_os
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a random hexadecimal database password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U research_os -d research_os"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  migrate:
+    build:
+      context: ..
+    image: btc-signal:local
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://research_os:${POSTGRES_PASSWORD}@postgres:5432/research_os
+    depends_on:
+      postgres:
+        condition: service_healthy
+  app:
+    image: btc-signal:local
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://research_os:${POSTGRES_PASSWORD}@postgres:5432/research_os
+      ENVIRONMENT: shadow
+      SIGNAL_EMISSION_ENABLED: ${SIGNAL_EMISSION_ENABLED:-false}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      REPORT_TIMEZONE: Europe/Moscow
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 35s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  postgres_data:

@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from research_os.intelligence.models import AnalysisResult, Evidence, EvidenceDirection
 from research_os.market.state_vector import MarketStateVector
+
 
 class MarketAnalyzer:
     """Converts available MSV features into auditable evidence; no probability is produced."""
@@ -112,7 +114,7 @@ class MarketAnalyzer:
         )
         return AnalysisResult(
             state.symbol,
-            state.timestamp,
+            state.decision_time,
             direction,
             tuple(ev),
             bull,

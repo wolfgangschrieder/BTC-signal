@@ -1,13 +1,21 @@
 from __future__ import annotations
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from research_os.signals.outcomes import OutcomeStatus
+
+from research_os.signals.execution import ExecutionStatus, evaluate_candle
 from research_os.signals.outcome_repository import SignalOutcomeRepository
-from research_os.signals.execution import ExecutionStatus,evaluate_candle
+from research_os.signals.outcomes import OutcomeStatus
+
 
 class SignalOutcomeEvaluator:
     """Resolves live signals against future 1m OHLC candles.
+
+    signal_time is the decision time, never the source candle open time.
+    Only candles opening strictly after that decision can fill an entry;
+    the entry candle cannot also resolve TP/SL.
 
     Entry is considered filled when candle range touches the entry zone.
     If SL and TP1 are both touched in the same OHLC candle, the outcome is ambiguous because
@@ -15,14 +23,13 @@ class SignalOutcomeEvaluator:
     """
     def __init__(self,horizon_minutes:int=60): self.horizon_minutes=horizon_minutes
     def resolve_pending(self,session:Session,now:datetime|None=None)->int:
-        now=now or datetime.now(timezone.utc); repo=SignalOutcomeRepository(); resolved=0
+        now=now or datetime.now(UTC); repo=SignalOutcomeRepository(); resolved=0
         for s in repo.pending(session,now):
             horizon=s["horizon_minutes"] or self.horizon_minutes
             candles=session.execute(text("""SELECT event_time,open,high,low,close FROM market.candles
                 WHERE symbol=:symbol AND interval='1' AND event_time>:time AND event_time<=:until
                 AND point_in_time_available_at<=:now ORDER BY event_time"""),
                 {"symbol":s["symbol"],"time":s["signal_time"],"until":s["signal_time"]+timedelta(minutes=horizon),"now":now}).mappings().all()
-            if not candles: continue
             entry=None; best_mfe=0.0; worst_mae=0.0
             for c in candles:
                 high=float(c["high"]); low=float(c["low"])

@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_url:str="postgresql+psycopg://research_os:research_os@localhost:5433/research_os"
     bybit_api_key:str=""; bybit_api_secret:str=""
     telegram_bot_token:str=""; telegram_chat_id:str=""
+    signal_emission_enabled:bool=True
     signal_min_probability:float=Field(default=.70,ge=0,le=1); signal_min_ev:float=0.0
     signal_guard_max_latency_ms:float=500.0
     signal_guard_max_spread_bps:float=10.0

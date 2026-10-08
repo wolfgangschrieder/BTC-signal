@@ -33,18 +33,29 @@ async def test_outcome_publisher_failure_marks_outcome_persistence_unhealthy():
 
 
 @pytest.mark.asyncio
-async def test_notification_failure_is_observable_without_killing_writer():
+async def test_notification_failure_marks_service_unhealthy(monkeypatch):
+    from research_os.notifications.outbox import NotificationOutboxWorker
+
     class FailingTelegram:
+        chat_id = "unit-test"
+
         async def send(self, _text):
             raise RuntimeError("telegram unavailable")
 
     service = LiveSignalService(telegram=FailingTelegram())
-    task = asyncio.create_task(service._cold_notification_writer())
-    service._notification_queue.put_nowait("signal")
-    await service._notification_queue.join()
+    worker = NotificationOutboxWorker(service.telegram, on_health=service._notification_health)
+    item = {"id": 1, "message": "signal", "claim_token": "test", "attempts": 1}
+    retried = []
+
+    def transaction(method, *args):
+        if method.__name__ == "claim":
+            return item
+        retried.append(args)
+
+    monkeypatch.setattr(worker, "_transaction", transaction)
+    assert await worker.deliver_once()
     assert service._notification_healthy is False
-    await service._notification_queue.put(service._writer_stop)
-    await task
+    assert len(retried) == 1
 
 
 @pytest.mark.asyncio

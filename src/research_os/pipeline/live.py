@@ -4,6 +4,8 @@ from research_os.features.timeframes import OHLCVBar, MultiTimeframeFeatureEngin
 from collections.abc import Awaitable,Callable
 from datetime import datetime,timezone
 import asyncio
+import logging
+import httpx
 from time import perf_counter
 from research_os.exchanges.bybit.normalizer import BybitNormalizer
 from research_os.exchanges.bybit.orderbook import OrderBook, OrderBookError
@@ -20,6 +22,7 @@ from research_os.intelligence.analyzer import MarketAnalyzer
 from research_os.intelligence.probability import ProbabilityEngine
 from research_os.notifications.telegram import TelegramFormatter
 from research_os.notifications.telegram_client import TelegramClient
+from research_os.notifications.outbox import NotificationOutboxRepository, NotificationOutboxWorker
 from research_os.signals.engine import SignalEngine
 from research_os.signals.guard import SignalGuard
 from research_os.signals.outcomes import SignalOutcome,OutcomeStatus
@@ -28,6 +31,8 @@ from research_os.pipeline.realtime import RealtimeSignalPipeline
 from research_os.database.session import SessionLocal
 from research_os.market.state_repository import MarketStateRepository
 from research_os.pipeline.latency import LatencyTelemetry
+
+logger = logging.getLogger(__name__)
 
 EventPublisher=Callable[[object],Awaitable[None]]
 
@@ -57,7 +62,10 @@ class LiveSignalService:
         self._state_write_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
         self._outcome_write_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
         self._event_publish_queue: asyncio.Queue = asyncio.Queue(maxsize=10_000)
-        self._notification_queue: asyncio.Queue = asyncio.Queue()
+        self._notification_stop = asyncio.Event()
+        self.outbox = NotificationOutboxRepository()
+        self._trade_data_healthy = True
+        self.trade_normalization_errors = 0
         self._event_persistence_healthy = True
         self._state_persistence_healthy = True
         self._outcome_persistence_healthy = True
@@ -79,21 +87,47 @@ class LiveSignalService:
         self.outcomes=SignalOutcomeRepository(); self.states=MarketStateRepository()
         self.websocket=BybitWebSocket(
             [f"kline.{interval}.{symbol}",f"tickers.{symbol}",f"orderbook.50.{symbol}",f"publicTrade.{symbol}",f"allLiquidation.{symbol}"],
-            self._handle,config or BybitWebSocketConfig(),latency=self.latency
+            self._handle,config or BybitWebSocketConfig(),latency=self.latency,on_disconnect=self._reset_stream_state
         )
+
+    def _reset_stream_state(self):
+        self.orderbook.invalidate("disconnected")
+        self._liquidity_state = None
+        self._ofi_history.clear()
+        self._latest_ofi = None
+        # Discontinuous price/flow histories cannot be used as a continuous research window.
+        for history in (self.closes,self.highs,self.lows,self.bars_1m,self.trades,self.liquidations):
+            history.clear()
+        self.cumulative_delta = 0.0
+        self.previous_flow_price = None
+        self.previous_flow_cvd = 0.0
+        self.derivatives_funding = self.derivatives_oi = None
+        self.previous_derivatives_price = self.previous_funding = self.previous_oi = None
+        self._last_candle_start = None
 
     async def _handle(self,message):
         topic=message.get("topic","")
         try:
             if topic.startswith("publicTrade."):
-                event=BybitNormalizer.trade(message); p=event.payload
-                self.trades.append(TradeObservation(event.event_time,float(p["price"]),float(p["size"]),str(p["side"])))
-                flow=self.orderflow.build([self.trades[-1]],event.event_time,cumulative_delta_base=self.cumulative_delta,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
-                if flow.available:
-                    self.cumulative_delta=flow.cumulative_delta or self.cumulative_delta
-                    self.previous_flow_price=float(p["price"])
-                    self.previous_flow_cvd=self.cumulative_delta
-                self._enqueue_event(event)
+                try:
+                    events = BybitNormalizer.trades(message)
+                    if any(event.symbol != self.symbol for event in events):
+                        raise ValueError("Trade batch symbol does not match subscription")
+                except (KeyError, ValueError, TypeError):
+                    self.trade_normalization_errors += 1
+                    self._trade_data_healthy = False
+                    logger.warning("Rejected Bybit trade batch; signal emission disabled until restart")
+                    return
+                for event in events:
+                    p = event.payload
+                    self.trades.append(TradeObservation(event.event_time,float(p["price"]),float(p["size"]),str(p["side"])))
+                    flow=self.orderflow.build([self.trades[-1]],event.event_time,cumulative_delta_base=self.cumulative_delta,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
+                    if flow.available:
+                        if flow.cumulative_delta is not None:
+                            self.cumulative_delta = flow.cumulative_delta
+                        self.previous_flow_price=float(p["price"])
+                        self.previous_flow_cvd=self.cumulative_delta
+                    self._enqueue_event(event)
                 return
             if topic.startswith("allLiquidation."):
                 events=BybitNormalizer.liquidations(message)
@@ -211,6 +245,7 @@ class LiveSignalService:
                     self._state_write_queue.put_nowait(state)
                 except asyncio.QueueFull:
                     _ = self._state_write_queue.get_nowait()
+                    self._state_write_queue.task_done()
                     self._state_write_queue.put_nowait(state)
                 spread_bps=None
                 book_state=self.orderbook.state
@@ -221,17 +256,15 @@ class LiveSignalService:
                 age_ms=None
                 if book_state.last_event_time_ms>0:
                     age_ms=max(0,int(datetime.now(timezone.utc).timestamp()*1000)-book_state.last_event_time_ms)
-                context=SignalExecutionContext(latency_ms=self.websocket.latency_ms,spread_bps=spread_bps,orderbook_valid=book_state.valid,orderbook_age_ms=age_ms,data_quality_ok=(self._event_persistence_healthy and self._state_persistence_healthy and self._outcome_persistence_healthy and self._notification_healthy))
+                context=SignalExecutionContext(latency_ms=self.websocket.latency_ms,spread_bps=spread_bps,orderbook_valid=book_state.valid,orderbook_age_ms=age_ms,data_quality_ok=(self._trade_data_healthy and self._event_persistence_healthy and self._state_persistence_healthy and self._outcome_persistence_healthy and self._notification_healthy))
                 clusters=tuple(liquidity_state.bid_clusters+liquidity_state.ask_clusters) if liquidity_state.valid else ()
                 signal,msg=self.pipeline.evaluate(state,price,self._atr_from_features(snap),context=context,liquidity_clusters=clusters,mark_sent=False)
                 if msg is not None and signal.levels is not None and signal.direction.value!="none":
                     try:
-                        self._outcome_write_queue.put_nowait(signal)
+                        self._outcome_write_queue.put_nowait((signal, msg.text))
                     except asyncio.QueueFull:
                         self._outcome_persistence_healthy = False
                         return
-                    if msg and self.telegram:
-                        self._enqueue_notification(msg.text)
                     # Commit cooldown only after the signal has been accepted by
                     # the outcome persistence queue. This prevents a dropped
                     # outcome from consuming the signal cooldown.
@@ -248,13 +281,6 @@ class LiveSignalService:
             # Never discard raw market events silently. Disable new signals until the cold
             # persistence queue recovers so research state cannot be mistaken for complete.
             self._event_persistence_healthy = False
-
-    def _enqueue_notification(self, text: str) -> None:
-        try:
-            self._notification_queue.put_nowait(text)
-        except asyncio.QueueFull:
-            # The notification queue is intentionally unbounded; this branch is defensive.
-            raise RuntimeError("notification queue unexpectedly full")
 
     async def _cold_event_publisher(self) -> None:
         while True:
@@ -274,33 +300,29 @@ class LiveSignalService:
                 if success and self._event_publish_queue.qsize() <= self._event_publish_queue.maxsize // 2:
                     self._event_persistence_healthy = True
 
+    def _notification_health(self, healthy):
+        self._notification_healthy = healthy
+
     async def _cold_notification_writer(self) -> None:
-        while True:
-            text = await self._notification_queue.get()
-            if text is self._writer_stop:
-                self._notification_queue.task_done()
-                return
-            try:
-                if self.telegram:
-                    await self.telegram.send(text)
-            except Exception:
-                self._notification_healthy = False
-            else:
-                self._notification_healthy = True
-            finally:
-                self._notification_queue.task_done()
+        if self.telegram is None:
+            return
+        worker = NotificationOutboxWorker(self.telegram, on_health=self._notification_health)
+        await worker.run(self._notification_stop)
 
     async def _recover_orderbook(self):
         async with self._recovery_lock:
             try:
                 payload=await self.rest.get_orderbook(symbol=self.symbol,limit=50)
                 data=payload.get("result",{})
+                current = self.orderbook.state
+                if current.valid and current.last_event_time_ms > int(payload.get("time",0)):
+                    return
                 self.orderbook.restore_snapshot(
                     data.get("b",[]),data.get("a",[]),data.get("u",0),
                     data.get("seq"),payload.get("time",0)
                 )
                 self._last_orderbook_update=datetime.now(timezone.utc)
-            except (OrderBookError,KeyError,TypeError,ValueError,RuntimeError):
+            except (OrderBookError,KeyError,TypeError,ValueError,RuntimeError,httpx.HTTPError):
                 return
 
     async def _orderbook_watchdog(self):
@@ -309,11 +331,16 @@ class LiveSignalService:
             if await self._is_stopped():
                 return
             quality=self.orderbook.mark_stale(int(datetime.now(timezone.utc).timestamp()*1000),self.ORDERBOOK_STALE_MS)
-            if quality is not None:
+            if quality is not None or not self.orderbook.state.valid:
                 await self._recover_orderbook()
 
     async def _is_stopped(self):
         return getattr(self.websocket,"_stop").is_set()
+
+    def _persist_state(self, state):
+        with SessionLocal() as session:
+            self.states.save(session, state)
+            session.commit()
 
     async def _cold_writer(self):
         while True:
@@ -322,9 +349,7 @@ class LiveSignalService:
                 self._state_write_queue.task_done()
                 break
             try:
-                with SessionLocal() as session:
-                    self.states.save(session, state)
-                    session.commit()
+                await asyncio.to_thread(self._persist_state, state)
             except Exception:
                 self._state_persistence_healthy = False
             else:
@@ -332,36 +357,38 @@ class LiveSignalService:
             finally:
                 self._state_write_queue.task_done()
 
+    def _persist_emission(self, signal, message):
+        levels = signal.levels
+        if levels is None:
+            raise ValueError("cannot persist a signal without levels")
+        outcome = SignalOutcome(
+            signal.signal_id, signal.symbol, signal.direction.value, signal.timestamp,
+            (levels.entry_min + levels.entry_max) / 2, levels.stop_loss,
+            levels.tp1, levels.tp2, levels.tp3, signal.probability,
+            OutcomeStatus.PENDING, horizon_minutes=60,
+        )
+        with SessionLocal() as session:
+            self.outcomes.record_pending(session, outcome)
+            if self.telegram is not None:
+                self.outbox.enqueue(session, signal.signal_id, self.telegram.chat_id, message)
+            session.commit()
+
     async def _cold_outcome_writer(self):
         while True:
-            signal = await self._outcome_write_queue.get()
-            if signal is self._writer_stop:
+            emission = await self._outcome_write_queue.get()
+            if emission is self._writer_stop:
                 self._outcome_write_queue.task_done()
-                break
+                return
             try:
-                levels = signal.levels
-                if levels is not None:
-                    outcome = SignalOutcome(
-                        signal.signal_id, signal.symbol, signal.direction.value, signal.timestamp,
-                        (levels.entry_min + levels.entry_max) / 2, levels.stop_loss,
-                        levels.tp1, levels.tp2, levels.tp3, signal.probability,
-                        OutcomeStatus.PENDING, horizon_minutes=60
-                    )
-                    with SessionLocal() as session:
-                        self.outcomes.record_pending(session, outcome)
-                        session.commit()
+                signal, message = emission
+                await asyncio.to_thread(self._persist_emission, signal, message)
             except Exception:
                 self._outcome_persistence_healthy = False
+                logger.error("Signal outcome/outbox transaction failed; emission suppressed")
             else:
                 self._outcome_persistence_healthy = True
             finally:
                 self._outcome_write_queue.task_done()
-
-    async def _record_pending(self,signal):
-        try:
-            self._outcome_write_queue.put_nowait(signal)
-        except asyncio.QueueFull:
-            pass
 
     def _atr_from_features(self,snapshot):
         for feature in snapshot.features:
@@ -377,7 +404,8 @@ class LiveSignalService:
             await self.publisher_many(BybitNormalizer.funding_history(funding))
             oi=await self.rest.get_open_interest(symbol=self.symbol,interval_time="5min",limit=200)
             await self.publisher_many(BybitNormalizer.open_interest_history(oi,self.symbol))
-        except (KeyError,TypeError,ValueError,RuntimeError):
+        except (KeyError,TypeError,ValueError,RuntimeError,httpx.HTTPError):
+            logger.warning("Bybit derivatives bootstrap unavailable")
             return
 
     async def publisher_many(self, events):
@@ -390,25 +418,35 @@ class LiveSignalService:
     async def run(self):
         event_writer=asyncio.create_task(self._cold_event_publisher())
         notification_writer=asyncio.create_task(self._cold_notification_writer())
-        await self.bootstrap_derivatives_history()
-        await self.bootstrap_orderbook()
-        watchdog=asyncio.create_task(self._orderbook_watchdog())
         state_writer=asyncio.create_task(self._cold_writer())
         outcome_writer=asyncio.create_task(self._cold_outcome_writer())
+        watchdog = None
         try:
+            await self.bootstrap_derivatives_history()
+            await self.bootstrap_orderbook()
+            watchdog=asyncio.create_task(self._orderbook_watchdog())
             await self.websocket.run()
         finally:
-            watchdog.cancel()
-            await asyncio.gather(watchdog,return_exceptions=True)
-            await self._state_write_queue.join()
-            await self._outcome_write_queue.join()
-            await self._event_publish_queue.join()
-            await self._notification_queue.join()
-            await self._state_write_queue.put(self._writer_stop)
-            await self._outcome_write_queue.put(self._writer_stop)
-            await self._event_publish_queue.put(self._writer_stop)
-            await self._notification_queue.put(self._writer_stop)
-            await asyncio.gather(state_writer,outcome_writer,event_writer,notification_writer,return_exceptions=True)
+            workers=(state_writer,outcome_writer,event_writer,notification_writer)
+            try:
+                if watchdog is not None:
+                    watchdog.cancel()
+                    await asyncio.gather(watchdog,return_exceptions=True)
+                await self._state_write_queue.join()
+                await self._outcome_write_queue.join()
+                await self._event_publish_queue.join()
+                self._notification_stop.set()
+                await self._state_write_queue.put(self._writer_stop)
+                await self._outcome_write_queue.put(self._writer_stop)
+                await self._event_publish_queue.put(self._writer_stop)
+                await asyncio.gather(*workers,return_exceptions=True)
+            finally:
+                self._notification_stop.set()
+                cleanup = (*workers, *((watchdog,) if watchdog is not None else ()))
+                for worker in cleanup:
+                    if not worker.done():
+                        worker.cancel()
+                await asyncio.gather(*cleanup,return_exceptions=True)
 
     async def stop(self):
         await self.websocket.stop()

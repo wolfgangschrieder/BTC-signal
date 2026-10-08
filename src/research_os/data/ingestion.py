@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from research_os.data.models import QualityCode, QualityEvent, RawEvent
@@ -98,7 +99,7 @@ class EventIngestionService:
                     """INSERT INTO raw.quality_events
                     (code, severity, source, event_time, message, details)
                     VALUES (:code, :severity, :source, :event_time, :message, :details)"""
-                ),
+                ).bindparams(bindparam("details", type_=JSONB)),
                 {
                     "code": event.code.value if hasattr(event.code, "value") else str(event.code),
                     "severity": event.severity,
@@ -115,7 +116,7 @@ def event_fingerprint(event: RawEvent) -> str:
         "source": event.source,
         "event_type": event.event_type.value,
         "symbol": event.symbol,
-        "event_time": event.event_time.astimezone(timezone.utc).isoformat(),
+        "event_time": event.event_time.astimezone(UTC).isoformat(),
         "payload": event.payload,
         "schema_version": event.schema_version,
     }

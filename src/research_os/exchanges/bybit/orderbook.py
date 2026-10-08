@@ -58,6 +58,10 @@ class OrderBook:
         self._valid=True
         self._status="valid"
 
+    def invalidate(self, reason="invalid") -> None:
+        self._valid = False
+        self._status = reason
+
     def mark_stale(self, now_ms: int, max_age_ms: int) -> QualityEvent | None:
         if not self._valid or self._last_event_time_ms <= 0:
             return None

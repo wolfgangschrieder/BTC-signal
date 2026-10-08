@@ -1,17 +1,25 @@
 from __future__ import annotations
+
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime,timedelta
-from typing import Sequence
+from datetime import datetime, timedelta
+
 from research_os.features.engine import FeatureEngine
-from research_os.market.state_builder import MarketStateBuilder
 from research_os.intelligence.analyzer import MarketAnalyzer
-from research_os.intelligence.probability import ProbabilityEngine,CalibrationSample,CalibrationMetrics
+from research_os.intelligence.probability import (
+    CalibrationMetrics,
+    CalibrationSample,
+    ProbabilityEngine,
+)
+from research_os.market.state_builder import MarketStateBuilder
 from research_os.signals.engine import SignalEngine
-from research_os.signals.models import SignalDirection,SignalResult
-from research_os.signals.execution import ExecutionStatus,evaluate_candle
+from research_os.signals.execution import ExecutionStatus, evaluate_candle
+from research_os.signals.models import SignalDirection, SignalResult
+
 
 @dataclass(frozen=True)
 class ReplayCandle:
+    # Candle open time. Explicit availability is required for delayed/closed bars.
     event_time: datetime
     open: float
     high: float
@@ -79,7 +87,7 @@ class ReplayEngine:
             if decision_time in seen_decisions:
                 continue
             seen_decisions.add(decision_time)
-            available=[x for x in rows if (x.point_in_time_available_at or x.event_time) <= decision_time]
+            available=[x for x in rows if x.event_time <= decision_time and (x.point_in_time_available_at or x.event_time) <= decision_time]
             closes=[x.close for x in available]
             volumes=[x.volume for x in available]
             highs=[x.high for x in available]
