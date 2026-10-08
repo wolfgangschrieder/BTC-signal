@@ -98,7 +98,7 @@ class LiveSignalService:
             fee_bps=float(getattr(signal_settings, "execution_fee_bps", 0.0)),
             slippage_bps=float(getattr(signal_settings, "execution_slippage_bps", 0.0)),
         )
-        self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),signal_engine,TelegramFormatter(),guard_instance,self.latency)
+        self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),signal_engine,TelegramFormatter(observation=getattr(signal_settings, "environment", "development") == "shadow"),guard_instance,self.latency)
         from research_os.research.calibration_model import digest
         self.calibration_context = digest({
             "pipeline": "live-calibration-provenance-v2",

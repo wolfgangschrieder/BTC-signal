@@ -51,3 +51,19 @@ def test_symlink_not_overwritten(tmp_path):
     with pytest.raises(setup.SetupError):
         setup.save_settings(path, "123:placeholder", "42")
     assert target.read_text() == "unchanged"
+
+
+def test_observation_setup_enables_delivery_preserving_storage_and_database(tmp_path):
+    path = tmp_path / '.env'
+    path.write_text('POSTGRES_PASSWORD=existing\nSTORAGE_MAX_DATABASE_GB=18\n'
+                    'STORAGE_MIN_FREE_GB=5\nENVIRONMENT=production\nCROSS_MARKET_ENABLED=true\n')
+    setup.save_settings(path, '123:placeholder', '42', observe=True)
+    content = path.read_text()
+    assert 'POSTGRES_PASSWORD=existing' in content
+    assert 'STORAGE_MAX_DATABASE_GB=18' in content
+    assert 'STORAGE_MIN_FREE_GB=5' in content
+    assert 'SIGNAL_EMISSION_ENABLED=true' in content
+    assert 'ENVIRONMENT=shadow' in content
+    assert 'CROSS_MARKET_ENABLED=false' in content
+    assert 'ENVIRONMENT=production' not in content
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
