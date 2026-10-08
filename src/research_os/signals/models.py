@@ -17,6 +17,7 @@ class SignalLevels:
 @dataclass(frozen=True)
 class SignalResult:
     symbol: str; timestamp: datetime; direction: SignalDirection; probability: float; no_signal_probability: float; levels: SignalLevels|None; expected_value: float; leverage: float; rationale: tuple[str,...]; risks: tuple[str,...]; model_version: str="signal-v1"
+    probability_is_calibrated: bool = False
     @property
     def signal_id(self)->str:
         raw=f"{self.symbol}|{self.direction.value}|{self.timestamp.isoformat()}|{self.model_version}".encode()

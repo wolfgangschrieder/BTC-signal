@@ -7,9 +7,14 @@ from research_os.signals.outcomes import OutcomeStatus, SignalOutcome
 class SignalOutcomeRepository:
     def record_pending(self,session:Session,outcome:SignalOutcome)->None:
         session.execute(text("""INSERT INTO signal_outcomes
-        (signal_id,symbol,direction,signal_time,entry_price,stop_loss,tp1,tp2,tp3,probability,status,horizon_minutes,reason)
-        VALUES (:id,:symbol,:direction,:time,:entry,:sl,:tp1,:tp2,:tp3,:prob,:status,:horizon,:reason)
-        ON CONFLICT (signal_id) DO NOTHING"""),dict(id=outcome.signal_id,symbol=outcome.symbol,direction=outcome.direction, time=outcome.signal_time,entry=outcome.entry_price,sl=outcome.stop_loss,tp1=outcome.tp1,tp2=outcome.tp2,tp3=outcome.tp3,prob=outcome.probability,status=outcome.status.value,horizon=outcome.horizon_minutes,reason=outcome.reason))
+        (signal_id,symbol,direction,signal_time,entry_price,stop_loss,tp1,tp2,tp3,probability,status,horizon_minutes,reason,fee_bps,slippage_bps,execution_policy)
+        VALUES (:id,:symbol,:direction,:time,:entry,:sl,:tp1,:tp2,:tp3,:prob,:status,:horizon,:reason,:fee,:slippage,:policy)
+        ON CONFLICT (signal_id) DO NOTHING"""),dict(id=outcome.signal_id,symbol=outcome.symbol,direction=outcome.direction, time=outcome.signal_time,entry=outcome.entry_price,sl=outcome.stop_loss,tp1=outcome.tp1,tp2=outcome.tp2,tp3=outcome.tp3,prob=outcome.probability,status=outcome.status.value,horizon=outcome.horizon_minutes,reason=outcome.reason,fee=outcome.fee_bps,slippage=outcome.slippage_bps,policy=outcome.execution_policy))
+
+    def latest_emissions(self, session: Session, symbol: str):
+        return session.execute(text("""SELECT symbol,direction,max(signal_time) AS signal_time
+            FROM signal_outcomes WHERE symbol=:symbol GROUP BY symbol,direction"""),
+            {"symbol": symbol}).mappings().all()
 
     def summary(self,session:Session,since:datetime)->dict:
         rows=session.execute(text("""SELECT status, count(*) FROM signal_outcomes
@@ -29,7 +34,7 @@ class SignalOutcomeRepository:
         }
 
     def pending(self,session:Session,now:datetime):
-        return session.execute(text("""SELECT signal_id,symbol,direction,signal_time,entry_price,stop_loss,tp1,tp2,tp3,probability,horizon_minutes
+        return session.execute(text("""SELECT signal_id,symbol,direction,signal_time,entry_price,stop_loss,tp1,tp2,tp3,probability,horizon_minutes,fee_bps,slippage_bps,execution_policy
         FROM signal_outcomes WHERE status='pending' AND signal_time < :now ORDER BY signal_time"""),{"now":now}).mappings().all()
 
     def resolve(self,session:Session,signal_id,status,realized_return=None,mfe=None,mae=None,resolved_at=None,reason=None):

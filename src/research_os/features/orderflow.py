@@ -49,8 +49,15 @@ class OrderFlowEngine:
         previous_price: float | None = None,
         previous_cumulative_delta: float | None = None,
         large_trade_quantile: float = 0.90,
+        max_age_seconds: float = 60.0,
+        cumulative_delta_override: float | None = None,
     ) -> OrderFlowSnapshot:
-        window = trades[-lookback:]
+        if lookback <= 0 or max_age_seconds <= 0:
+            raise ValueError("lookback and max_age_seconds must be positive")
+        window = sorted(
+            (trade for trade in trades if 0 <= (timestamp - trade.timestamp).total_seconds() <= max_age_seconds),
+            key=lambda trade: trade.timestamp,
+        )[-lookback:]
         valid = []
         buy = 0.0
         sell = 0.0
@@ -72,7 +79,7 @@ class OrderFlowEngine:
 
         total = buy + sell
         delta = buy - sell
-        cumulative = cumulative_delta_base + delta
+        cumulative = cumulative_delta_base + delta if cumulative_delta_override is None else cumulative_delta_override
 
         sizes = [trade.size for trade in valid]
         sizes.sort()

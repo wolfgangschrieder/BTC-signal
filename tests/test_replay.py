@@ -281,7 +281,7 @@ def test_replay_report_exposes_ambiguous_and_unresolved_without_scoring_them():
     )
     report = engine.run("BTCUSDT", data)
     assert report.results[0].outcome_status == "ambiguous"
-    assert report.ambiguous == 1
+    assert report.ambiguous == 2
     assert report.unresolved == report.signals
     assert report.resolved == report.wins == report.losses == 0
     assert report.win_rate is None
@@ -330,7 +330,7 @@ def test_replay_short_same_candle_tp_and_sl_is_ambiguous():
     assert ret is None
 
 
-def test_replay_entry_candle_does_not_exit_same_candle():
+def test_replay_entry_candle_exit_is_ambiguous():
     from datetime import datetime, timedelta
     from types import SimpleNamespace
 
@@ -348,12 +348,12 @@ def test_replay_entry_candle_does_not_exit_same_candle():
     ]
     engine = ReplayEngine(horizon_minutes=2)
     status, outcome, ret = engine._future_outcome(signal, data, t)
-    assert status == "expired"
+    assert status == "ambiguous"
     assert outcome is None
     assert ret is None
 
 
-def test_replay_entry_candle_with_tp_and_sl_waits_for_next_candle():
+def test_replay_entry_candle_with_tp_and_sl_is_ambiguous():
     from datetime import datetime, timedelta
     from types import SimpleNamespace
 
@@ -371,7 +371,7 @@ def test_replay_entry_candle_with_tp_and_sl_waits_for_next_candle():
     ]
     engine = ReplayEngine(horizon_minutes=2)
     status, outcome, ret = engine._future_outcome(signal, data, t)
-    assert status == "expired"
+    assert status == "ambiguous"
     assert outcome is None
     assert ret is None
 

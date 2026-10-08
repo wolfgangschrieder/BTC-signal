@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from math import isfinite
 from research_os.signals.models import SignalDirection, SignalResult
@@ -23,6 +23,7 @@ class SignalGuard:
     min_rr: float=1.5
     last_key: str|None=None
     last_sent_at: datetime|None=None
+    sent_at: dict[str, datetime] = field(default_factory=dict)
 
     def validate(self, signal: SignalResult, context: SignalExecutionContext | None = None) -> tuple[bool, tuple[str,...]]:
         if signal.direction is SignalDirection.NONE:
@@ -59,15 +60,22 @@ class SignalGuard:
                 return False, ("orderbook is invalid",)
             if context.orderbook_age_ms is not None and context.orderbook_age_ms > self.max_orderbook_age_ms:
                 return False, ("orderbook is stale",)
-        key=f"{signal.symbol}:{signal.direction.value}:{signal.levels}"
-        if self.last_key == key and self.last_sent_at is not None:
-            if signal.timestamp-self.last_sent_at < self.cooldown:
-                return False, ("duplicate signal inside cooldown",)
+        key=f"{signal.symbol}:{signal.direction.value}"
+        last = self.sent_at.get(key)
+        if last is not None and signal.timestamp-last < self.cooldown:
+            return False, ("duplicate signal inside cooldown",)
         return True, ()
 
     def allow(self, signal: SignalResult, context: SignalExecutionContext | None = None) -> bool:
         return self.validate(signal, context)[0]
 
+    def restore_sent(self, symbol: str, direction: str, timestamp: datetime) -> None:
+        key = f"{symbol}:{direction}"
+        previous = self.sent_at.get(key)
+        if previous is None or timestamp > previous:
+            self.sent_at[key] = timestamp
+
     def mark_sent(self, signal: SignalResult) -> None:
-        self.last_key=f"{signal.symbol}:{signal.direction.value}:{signal.levels}"
+        self.last_key=f"{signal.symbol}:{signal.direction.value}"
         self.last_sent_at=signal.timestamp
+        self.restore_sent(signal.symbol, signal.direction.value, signal.timestamp)

@@ -16,7 +16,7 @@ def test_formatter_contains_human_actionable_fields():
     p=ProbabilityResult("BTCUSDT",t,.8,.1,.1)
     s=SignalEngine().build(a,p,100,2)
     text=TelegramFormatter().format(s).text
-    assert "BTCUSDT LONG" in text and "Entry:" in text and "SL:" in text and "TP1:" in text and "Probability:" in text
+    assert "BTCUSDT LONG" in text and "Entry:" in text and "SL:" in text and "TP1:" in text and "Research score (uncalibrated):" in text
 
 def test_pipeline_does_not_emit_no_signal():
     t=datetime(2026,1,1,tzinfo=timezone.utc)

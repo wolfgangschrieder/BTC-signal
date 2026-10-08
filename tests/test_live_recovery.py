@@ -83,6 +83,7 @@ async def test_cancelled_service_cleans_up_blocked_publisher(monkeypatch):
     async def websocket():
         await asyncio.Event().wait()
 
+    monkeypatch.setattr(service, "_restore_cooldown", lambda: None)
     monkeypatch.setattr(service, "bootstrap_derivatives_history", bootstrap)
     monkeypatch.setattr(service, "bootstrap_orderbook", no_op)
     monkeypatch.setattr(service.websocket, "run", websocket)

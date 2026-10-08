@@ -41,11 +41,13 @@ class LiveSignalService:
 
     ORDERBOOK_STALE_MS=5000
 
-    def __init__(self,symbol="BTCUSDT",interval="1",publisher:EventPublisher|None=None,telegram:TelegramClient|None=None,config=None,guard:SignalGuard|None=None):
+    def __init__(self,symbol="BTCUSDT",interval="1",publisher:EventPublisher|None=None,telegram:TelegramClient|None=None,config=None,guard:SignalGuard|None=None,settings=None):
+        signal_settings = settings or config
+        history_size = int(getattr(signal_settings, "live_history_minutes", 10080))
         self.symbol=symbol; self.interval=interval; self.publisher=publisher
         self.telegram=telegram
-        self.closes=deque(maxlen=2000); self.highs=deque(maxlen=2000); self.lows=deque(maxlen=2000); self.bars_1m=deque(maxlen=2000); self.trades=deque(maxlen=5000)
-        self.orderflow=OrderFlowEngine(); self.cumulative_delta=0.0; self.previous_flow_price=None; self.previous_flow_cvd=0.0
+        self.closes=deque(maxlen=history_size); self.highs=deque(maxlen=history_size); self.lows=deque(maxlen=history_size); self.bars_1m=deque(maxlen=history_size); self.trades=deque(maxlen=5000)
+        self.orderflow=OrderFlowEngine(); self.cumulative_delta=0.0; self.previous_flow_price=None; self.previous_flow_cvd=0.0; self._previous_candle_flow_price=None; self._previous_candle_cvd=0.0
         self.derivatives=DerivativesEngine(); self.derivatives_funding=None; self.derivatives_oi=None; self.previous_derivatives_price=None; self.previous_funding=None; self.previous_oi=None; self.liquidations=deque(maxlen=5000)
         self.mtf=MultiTimeframeFeatureEngine()
         self.liquidity=LiquidityEngine()
@@ -74,14 +76,17 @@ class LiveSignalService:
         self._writer_stop = object()
         self.features=FeatureEngine(); self.builder=MarketStateBuilder()
         guard_instance = guard or SignalGuard(
-            max_latency_ms=float(getattr(config, "signal_guard_max_latency_ms", 500.0)) if config is not None else 500.0,
-            max_spread_bps=float(getattr(config, "signal_guard_max_spread_bps", 10.0)) if config is not None else 10.0,
-            max_orderbook_age_ms=int(getattr(config, "signal_guard_max_orderbook_age_ms", 5000)) if config is not None else 5000,
-            min_probability=float(getattr(config, "signal_min_probability", 0.70)) if config is not None else 0.70,
-            min_expected_value=float(getattr(config, "signal_min_ev", 0.0)) if config is not None else 0.0,
+            max_latency_ms=float(getattr(signal_settings, "signal_guard_max_latency_ms", 500.0)) if signal_settings is not None else 500.0,
+            max_spread_bps=float(getattr(signal_settings, "signal_guard_max_spread_bps", 10.0)) if signal_settings is not None else 10.0,
+            max_orderbook_age_ms=int(getattr(signal_settings, "signal_guard_max_orderbook_age_ms", 5000)) if signal_settings is not None else 5000,
+            min_probability=float(getattr(signal_settings, "signal_min_probability", 0.70)) if signal_settings is not None else 0.70,
+            min_expected_value=float(getattr(signal_settings, "signal_min_ev", 0.0)) if signal_settings is not None else 0.0,
         )
         signal_engine = SignalEngine(
-            min_probability=float(getattr(config, "signal_min_probability", 0.70)) if config is not None else 0.70
+            min_probability=guard_instance.min_probability,
+            require_calibrated_probability=getattr(signal_settings, "environment", "development") == "production",
+            fee_bps=float(getattr(signal_settings, "execution_fee_bps", 0.0)),
+            slippage_bps=float(getattr(signal_settings, "execution_slippage_bps", 0.0)),
         )
         self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),signal_engine,TelegramFormatter(),guard_instance,self.latency)
         self.outcomes=SignalOutcomeRepository(); self.states=MarketStateRepository()
@@ -101,6 +106,8 @@ class LiveSignalService:
         self.cumulative_delta = 0.0
         self.previous_flow_price = None
         self.previous_flow_cvd = 0.0
+        self._previous_candle_flow_price = None
+        self._previous_candle_cvd = 0.0
         self.derivatives_funding = self.derivatives_oi = None
         self.previous_derivatives_price = self.previous_funding = self.previous_oi = None
         self._last_candle_start = None
@@ -184,12 +191,18 @@ class LiveSignalService:
             if topic.startswith("kline.") and len(self.closes)>=6:
                 now=datetime.now(timezone.utc)
                 closes=list(self.closes); highs=list(self.highs); lows=list(self.lows); bars=list(self.bars_1m); trades=list(self.trades); book_state=self.orderbook.state
-                snap_task=asyncio.to_thread(self.features.build,self.symbol,event.event_time,closes,highs=highs,lows=lows,orderbook=book_state)
+                snap_task=asyncio.to_thread(self.features.build,self.symbol,event.event_time,closes,highs=highs,lows=lows,orderbook=book_state,as_of=now)
                 mtf_task=asyncio.to_thread(self.mtf.build,self.symbol,bars,event.event_time,as_of=now)
-                flow_task=self.orderflow.build_async(trades,event.event_time,cumulative_delta_base=0.0,previous_price=self.previous_flow_price,previous_cumulative_delta=self.previous_flow_cvd)
+                flow_task=self.orderflow.build_async(
+                    trades, now, cumulative_delta_override=self.cumulative_delta,
+                    previous_price=self._previous_candle_flow_price,
+                    previous_cumulative_delta=self._previous_candle_cvd,
+                )
                 _stage_start=perf_counter()
                 snap,mtf_snapshot,flow=await asyncio.gather(snap_task,mtf_task,flow_task)
                 self.latency.observe("feature_bundle", (perf_counter()-_stage_start)*1000.0)
+                self._previous_candle_flow_price = float(event.payload["close"])
+                self._previous_candle_cvd = self.cumulative_delta
                 flow_values=snapshot_features(flow)
                 flow_values["orderflow_cumulative_delta"]=self.cumulative_delta
                 cutoff=event.event_time.timestamp()-3600
@@ -220,7 +233,7 @@ class LiveSignalService:
                     self._liquidity_state=liquidity_state
                 liquidity_values=liquidity_features(liquidity_state)
                 extra.update(liquidity_values)
-                decision_ms=int(event.event_time.timestamp()*1000)
+                decision_ms=int(now.timestamp()*1000)
                 eligible_ofi=[item for item in self._ofi_history if item[0] <= decision_ms]
                 if eligible_ofi:
                     ofi_ts,ofi_raw=eligible_ofi[-1]
@@ -244,6 +257,7 @@ class LiveSignalService:
                 try:
                     self._state_write_queue.put_nowait(state)
                 except asyncio.QueueFull:
+                    self._state_persistence_healthy = False
                     _ = self._state_write_queue.get_nowait()
                     self._state_write_queue.task_done()
                     self._state_write_queue.put_nowait(state)
@@ -366,6 +380,9 @@ class LiveSignalService:
             (levels.entry_min + levels.entry_max) / 2, levels.stop_loss,
             levels.tp1, levels.tp2, levels.tp3, signal.probability,
             OutcomeStatus.PENDING, horizon_minutes=60,
+            fee_bps=self.pipeline.signal.fee_bps,
+            slippage_bps=self.pipeline.signal.slippage_bps,
+            execution_policy="conservative-midpoint-v2",
         )
         with SessionLocal() as session:
             self.outcomes.record_pending(session, outcome)
@@ -415,7 +432,14 @@ class LiveSignalService:
     async def bootstrap_orderbook(self):
         await self._recover_orderbook()
 
+    def _restore_cooldown(self):
+        with SessionLocal() as session:
+            for row in self.outcomes.latest_emissions(session, self.symbol):
+                self.pipeline.guard.restore_sent(row["symbol"], row["direction"], row["signal_time"])
+
     async def run(self):
+        if self.publisher is not None:
+            await asyncio.to_thread(self._restore_cooldown)
         event_writer=asyncio.create_task(self._cold_event_publisher())
         notification_writer=asyncio.create_task(self._cold_notification_writer())
         state_writer=asyncio.create_task(self._cold_writer())

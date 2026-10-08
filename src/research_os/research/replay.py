@@ -64,13 +64,14 @@ class ReplayReport:
 
 class ReplayEngine:
     """Deterministic historical replay with a strict point-in-time information boundary."""
-    def __init__(self,feature_engine=None,builder=None,analyzer=None,probability=None,signal_engine=None,horizon_minutes=60,fee_bps=0.0,slippage_bps=0.0):
+    def __init__(self,feature_engine=None,builder=None,analyzer=None,probability=None,signal_engine=None,horizon_minutes=60,fee_bps=0.0,slippage_bps=0.0, conservative_entry=True):
         if horizon_minutes <= 0: raise ValueError("horizon_minutes must be positive")
         if fee_bps < 0 or slippage_bps < 0: raise ValueError("fee_bps and slippage_bps must be non-negative")
         self.features=feature_engine or FeatureEngine(); self.builder=builder or MarketStateBuilder()
         self.analyzer=analyzer or MarketAnalyzer(); self.probability=probability or ProbabilityEngine()
         self.signal_engine=signal_engine or SignalEngine(); self.horizon_minutes=horizon_minutes
         self.fee_bps=fee_bps; self.slippage_bps=slippage_bps
+        self.conservative_entry=conservative_entry
 
     def run(self,symbol:str,candles:Sequence[ReplayCandle],dataset_version="replay-v1")->ReplayReport:
         # Event-time order is required for feature construction and future outcomes.
@@ -130,9 +131,10 @@ class ReplayEngine:
                     stop_loss=levels.stop_loss, take_profit=levels.tp1,
                     high=candle.high, low=candle.low,
                     fee_bps=self.fee_bps, slippage_bps=self.slippage_bps,
-                    check_exit=False,
+                    check_exit=False, conservative_entry=self.conservative_entry,
                 )
                 if fill.status is ExecutionStatus.NO_FILL: continue
+                if fill.status is ExecutionStatus.AMBIGUOUS: return "ambiguous",None,None
                 filled=True
                 entry=fill.entry_price
                 continue

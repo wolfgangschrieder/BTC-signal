@@ -16,7 +16,7 @@ class ExecutionResult:
     realized_return: float|None=None
     reason: str|None=None
 
-def evaluate_candle(direction, *, entry_price, stop_loss, take_profit, high, low, fee_bps=0.0, slippage_bps=0.0, check_exit=True, entry_filled=False):
+def evaluate_candle(direction, *, entry_price, stop_loss, take_profit, high, low, fee_bps=0.0, slippage_bps=0.0, check_exit=True, entry_filled=False, conservative_entry=False):
     if entry_price<=0 or stop_loss<=0 or take_profit<=0:
         raise ValueError("prices must be positive")
     if fee_bps<0 or slippage_bps<0:
@@ -29,6 +29,10 @@ def evaluate_candle(direction, *, entry_price, stop_loss, take_profit, high, low
             return ExecutionResult(ExecutionStatus.NO_FILL)
         entry=entry_price*(1+slip) if direction is SignalDirection.LONG else entry_price*(1-slip)
         if not check_exit:
+            if conservative_entry:
+                touches_exit = (low <= stop_loss or high >= take_profit) if direction is SignalDirection.LONG else (high >= stop_loss or low <= take_profit)
+                if touches_exit:
+                    return ExecutionResult(ExecutionStatus.AMBIGUOUS, entry, None, "entry and exit touched in one candle; ordering unknown")
             return ExecutionResult(ExecutionStatus.PENDING,entry)
     else:
         entry=entry_price

@@ -37,3 +37,6 @@ class SignalOutcome:
     resolved_at: datetime|None=None
     horizon_minutes: int|None=None
     reason: str|None=None
+    fee_bps: float = 0.0
+    slippage_bps: float = 0.0
+    execution_policy: str = "legacy-entry-only"
