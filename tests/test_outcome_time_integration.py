@@ -75,12 +75,13 @@ def status(db):
 
 
 @pytest.mark.parametrize("direction", ["long", "short"])
-def test_delayed_decision_excludes_existing_candles_and_matches_replay(db, direction):
+@pytest.mark.parametrize("policy,expected", [("legacy-entry-only", "win"), ("conservative-midpoint-v2", "ambiguous")])
+def test_delayed_decision_excludes_existing_candles_and_matches_replay(db, direction, policy, expected):
     from types import SimpleNamespace
 
     t = datetime(2026, 1, 1, tzinfo=UTC)
     decision = t + timedelta(minutes=1, milliseconds=100)
-    outcome = pending(db, decision, direction)
+    outcome = pending(db, decision, direction, execution_policy=policy)
     candles = [
         store_candle(db, t, 102, 98),
         store_candle(db, t + timedelta(minutes=1), 102, 98),
@@ -93,7 +94,7 @@ def test_delayed_decision_excludes_existing_candles_and_matches_replay(db, direc
         ),
     ]
     assert SignalOutcomeEvaluator().resolve_pending(db, t + timedelta(minutes=5)) == 1
-    assert status(db) == "win"
+    assert status(db) == expected
     signal = SimpleNamespace(
         direction=SignalDirection(direction),
         levels=SimpleNamespace(
@@ -103,11 +104,11 @@ def test_delayed_decision_excludes_existing_candles_and_matches_replay(db, direc
             tp1=outcome.tp1,
         ),
     )
-    replay_status, score, _ = ReplayEngine(horizon_minutes=10)._future_outcome(
+    replay_status, score, _ = ReplayEngine(horizon_minutes=10, conservative_entry=policy != "legacy-entry-only")._future_outcome(
         signal, candles, decision
     )
     assert replay_status == status(db)
-    assert score == 1
+    assert score == (1 if expected == "win" else None)
 
 
 def test_outcome_waits_for_delayed_candle_availability(db):
