@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     signal_guard_max_spread_bps:float=10.0
     signal_guard_max_orderbook_age_ms:int=5000
     live_history_minutes:int=Field(default=10080,ge=8640)
+    calibration_model_ids:str=""
+    calibration_max_age_days:int=Field(default=30,ge=1)
     execution_fee_bps:float=Field(default=0.0,ge=0)
     execution_slippage_bps:float=Field(default=0.0,ge=0)
     report_timezone:str="Europe/Moscow"; report_hour:int=20; report_minute:int=0

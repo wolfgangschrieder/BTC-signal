@@ -1,5 +1,6 @@
 from __future__ import annotations
 from collections import deque
+from dataclasses import asdict
 from research_os.features.timeframes import OHLCVBar, MultiTimeframeFeatureEngine
 from collections.abc import Awaitable,Callable
 from datetime import datetime,timezone
@@ -43,6 +44,8 @@ class LiveSignalService:
 
     def __init__(self,symbol="BTCUSDT",interval="1",publisher:EventPublisher|None=None,telegram:TelegramClient|None=None,config=None,guard:SignalGuard|None=None,settings=None):
         signal_settings = settings or config
+        self._calibration_model_ids = tuple(x.strip() for x in str(getattr(signal_settings, "calibration_model_ids", "")).split(",") if x.strip())
+        self._calibration_max_age_days = int(getattr(signal_settings, "calibration_max_age_days", 30))
         history_size = int(getattr(signal_settings, "live_history_minutes", 10080))
         self.symbol=symbol; self.interval=interval; self.publisher=publisher
         self.telegram=telegram
@@ -89,6 +92,24 @@ class LiveSignalService:
             slippage_bps=float(getattr(signal_settings, "execution_slippage_bps", 0.0)),
         )
         self.pipeline=RealtimeSignalPipeline(MarketAnalyzer(),ProbabilityEngine(),signal_engine,TelegramFormatter(),guard_instance,self.latency)
+        from research_os.research.calibration_model import digest
+        self.calibration_context = digest({
+            "pipeline": "live-calibration-provenance-v1", "symbol": symbol, "interval": interval,
+            "analysis_version": self.pipeline.analyzer.version, "minority_ratio": self.pipeline.analyzer.minority_ratio,
+            "probability_version": self.pipeline.probability.version,
+            "min_directional_score": self.pipeline.probability.min_directional_score,
+            "temperature": self.pipeline.probability.temperature,
+            "signal_version": signal_engine.version, "risk_version": signal_engine.risk.version,
+            "risk_policy": asdict(signal_engine.risk.policy), "feature_version": self.features.version,
+            "history_minutes": history_size, "orderflow_version": self.orderflow.version,
+            "mtf_version": self.mtf.version, "horizon_minutes": 60,
+            "execution_policy": "conservative-midpoint-v2",
+            "fee_bps": signal_engine.fee_bps, "slippage_bps": signal_engine.slippage_bps,
+            "min_probability": guard_instance.min_probability, "min_ev": guard_instance.min_expected_value,
+            "cooldown_seconds": guard_instance.cooldown.total_seconds(),
+            "min_rr": guard_instance.min_rr, "max_spread_bps": guard_instance.max_spread_bps,
+            "max_latency_ms": guard_instance.max_latency_ms, "max_book_age_ms": guard_instance.max_orderbook_age_ms,
+        })
         self.outcomes=SignalOutcomeRepository(); self.states=MarketStateRepository()
         self.websocket=BybitWebSocket(
             [f"kline.{interval}.{symbol}",f"tickers.{symbol}",f"orderbook.50.{symbol}",f"publicTrade.{symbol}",f"allLiquidation.{symbol}"],
@@ -383,6 +404,8 @@ class LiveSignalService:
             fee_bps=self.pipeline.signal.fee_bps,
             slippage_bps=self.pipeline.signal.slippage_bps,
             execution_policy="conservative-midpoint-v2",
+            research_score=signal.research_score, probability_model_id=signal.probability_model_id,
+            calibration_context=self.calibration_context,
         )
         with SessionLocal() as session:
             self.outcomes.record_pending(session, outcome)
@@ -437,7 +460,22 @@ class LiveSignalService:
             for row in self.outcomes.latest_emissions(session, self.symbol):
                 self.pipeline.guard.restore_sent(row["symbol"], row["direction"], row["signal_time"])
 
+    def _load_calibration(self):
+        from research_os.intelligence.calibrated_probability import FrozenCalibratedProbabilityEngine, FrozenCalibrationRegistry
+        from research_os.research.calibration_model_repository import CalibrationModelRepository
+        engines = []
+        with SessionLocal() as session:
+            for model_id in self._calibration_model_ids:
+                artifact = CalibrationModelRepository().load(session, model_id)
+                engines.append(FrozenCalibratedProbabilityEngine(
+                    artifact, model_id=model_id, symbol=self.symbol,
+                    context_id=self.calibration_context, max_age_days=self._calibration_max_age_days,
+                ))
+        self.pipeline.probability = FrozenCalibrationRegistry(engines)
+
     async def run(self):
+        if self._calibration_model_ids:
+            await asyncio.to_thread(self._load_calibration)
         if self.publisher is not None:
             await asyncio.to_thread(self._restore_cooldown)
         event_writer=asyncio.create_task(self._cold_event_publisher())

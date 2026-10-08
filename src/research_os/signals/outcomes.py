@@ -40,3 +40,6 @@ class SignalOutcome:
     fee_bps: float = 0.0
     slippage_bps: float = 0.0
     execution_policy: str = "legacy-entry-only"
+    research_score: float | None = None
+    probability_model_id: str | None = None
+    calibration_context: str | None = None

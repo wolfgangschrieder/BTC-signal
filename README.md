@@ -87,8 +87,8 @@ restart recovery for one runtime; it is not a distributed signal-emitter lock.
 
 The current probability engine remains uncalibrated. Development/shadow messages
 label it as a research score and EV as hypothetical. `ENVIRONMENT=production`
-blocks its signals until a calibrated model is connected; there is no production
-model artifact loader in this change. No calibration has been inferred from tests.
+blocks heuristic signals. Frozen models can be selected explicitly after OOS acceptance
+as described below. No market-model acceptance has been inferred from synthetic tests.
 Cross-market/news components remain research-only, outside the live directional vote.
 
 Run `alembic upgrade head` before updating the runtime. Migration 0014 persists
@@ -105,3 +105,44 @@ Calibration and win rate based on WIN/LOSS are conditional on resolution; EXPIRE
 and AMBIGUOUS outcomes are excluded and must not be presented as unconditional success.
 The six-hour VPS raw retention policy is unchanged; full historical tick replay
 requires separate archival storage.
+
+### Frozen TP1 calibration lifecycle
+
+Migration 0015 adds forecast provenance (`research_score`, model ID, context hash)
+and `intelligence.calibration_models`. Historical rows are left NULL and are excluded
+from fitting; they are not silently assigned the current model/context. Calibration
+uses new, resolved heuristic shadow forecasts under the conservative execution policy.
+Forecasts from already-calibrated models are excluded from this initial fitting path.
+The context hashes versions, symbol/interval, history, evidence/risk policy, costs,
+thresholds, cooldown and market-quality guards. Changing them invalidates a selected model.
+
+`research-os calibration-fit --symbol BTCUSDT --direction long` (or `short`) reads
+eligible outcomes, splits chronologically 60/20/20 and purges decisions crossing the
+previous partition's latest label availability. Temperature is fitted on TRAIN and
+selected on VALIDATION; TEST never tunes it. Default gates require at least 200/100/100
+samples after purge, both classes in each partition, ECE <= .05, MCE <= .15, Brier <= .25,
+no degradation against raw scores, and improvement over a frozen training-prior baseline.
+The actionable test subset above the configured emission threshold also needs at least
+30 samples, both classes and calibration error <= .05. Insufficient data returns exit
+code 2 without publishing a model. Evaluated artifacts, including rejected reports, are
+stored by content hash; rejection never activates a model automatically.
+
+The new target is **confirmed TP1 within the stored horizon**, under the stored simulator.
+WIN=1; LOSS, EXPIRED and AMBIGUOUS=0. This is a conservative confirmed-success target,
+not actual exchange execution probability or guaranteed net profit. The older
+`research-os calibration` command still reports conditional WIN/LOSS diagnostics and
+is not a production acceptance gate. EV remains a payoff proxy; complete profitability,
+funding/gap validation and operational launch gates are separate requirements.
+
+Explicitly set `CALIBRATION_MODEL_IDS=<long-model-hash>,<short-model-hash>` to load frozen
+accepted artifacts. One direction may be selected; unsupported directions abstain.
+Models are checked for content hash, acceptance, symbol/context and age (default 30 days
+from the latest test-label availability). Missing/rejected/mismatched models stop startup.
+A loaded model expires during runtime and abstains outside its fitted raw-score range;
+there is no fallback to heuristic production signals or automatic retraining/activation.
+Model ID, raw score and context are retained with every emitted forecast for later audit.
+
+No real forecast database was available during development of this feature; tests use
+synthetic fixtures. The implementation provides the lifecycle, not a fitted market model.
+Run `alembic upgrade head` before starting this runtime. Continue shadow collection until
+both directions have enough eligible evidence; do not lower acceptance gates to force launch.
