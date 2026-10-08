@@ -14,7 +14,7 @@ docker compose --env-file deploy/.env -f deploy/compose.yml build
 docker compose --env-file deploy/.env -f deploy/compose.yml up -d
 ```
 
-По умолчанию `SIGNAL_EMISSION_ENABLED=false`: бот принимает публичные данные, хранит market states и исследовательские outcomes, но не создаёт Telegram-клиент и не отправляет сообщения. Не переключайте true до приёмки качества данных, калибровки и риск-параметров. Для уведомлений нужны TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID. Режим наблюдения не требует ключей Bybit.
+По умолчанию `SIGNAL_EMISSION_ENABLED=false`: бот принимает публичные данные, хранит market states и исследовательские outcomes, но не создаёт Telegram-клиент и не отправляет сообщения. Для исследовательских сообщений до калибровки используйте режим наблюдения ниже; production требует проверенную калибровку. Для уведомлений нужны TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID. Режим наблюдения не требует ключей Bybit.
 
 Миграции выполняются отдельным контейнером до запуска приложения. PostgreSQL доступен только внутри Docker-сети; публичный порт БД не публикуется. Приложение работает от непривилегированного UID. Логи ограничены по размеру.
 
@@ -142,3 +142,33 @@ Calibration context and analyzer versions change in this release. Previously pin
 models must be refitted and re-evaluated for the new context, even though macro
 features do not change the directional score. No real source feed or server has
 been validated by the synthetic/integration tests.
+
+
+### Наблюдение с сигналами и комментариями в Telegram
+
+Для личного наблюдения настройте Telegram на сервере:
+
+```bash
+python3 deploy/configure-telegram.py --observe
+docker compose --env-file deploy/.env -f deploy/compose.yml up -d --force-recreate app
+```
+
+Скрипт скрыто запросит токен, проверит бота и выбранный личный чат, сохранит
+`ENVIRONMENT=shadow`, `SIGNAL_EMISSION_ENABLED=true`, `CROSS_MARKET_ENABLED=false`.
+Пароль PostgreSQL, накопленные данные и ограничения хранения сохраняются.
+Он не отправляет тестового сообщения; отправка начнётся после пересоздания app.
+Сначала нужны собранный актуальный образ и применённые миграции.
+
+Сообщения содержат LONG/SHORT, исследовательскую оценку, зону входа, SL/TP,
+комментарий из направленных аргументов анализа и ограничения расчёта.
+В shadow используется русский формат без кнопок согласования, поскольку
+обработчика пользовательских подтверждений в live-цикле нет. Калиброванные
+оценки выделяются отдельно. Некалиброванный балл не называется вероятностью успеха.
+Порог 0.70, проверка качества данных/стакана и cooldown 15 минут сохраняются;
+в отсутствие подходящих условий сообщений может не быть. Отправка Telegram
+не отключает сохранение прогнозов и автоматическое отслеживание outcomes.
+Автоматических сделок нет. При production некалиброванные сигналы блокируются.
+
+Не передавайте токен через этот чат или командную строку; вводите его в SSH-терминале.
+Защита диска остаётся: БД менее 18 GB и свободное место не менее 5 GB.
+Эти изменения должны быть установлены на VPS; подготовка кода не означает запуск.

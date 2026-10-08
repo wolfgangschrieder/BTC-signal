@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Configure Telegram on the VPS without exposing tokens or sending messages."""
+import argparse
 import getpass
 import json
 import os
@@ -41,14 +42,17 @@ def private_chats(updates):
     return chats
 
 
-def save_settings(path, token, chat_id):
+def save_settings(path, token, chat_id, observe=False):
     if path.is_symlink() or not path.is_file():
         raise SetupError("Нужен обычный файл deploy/.env с настройками PostgreSQL.")
     settings = {
         "TELEGRAM_BOT_TOKEN": token,
         "TELEGRAM_CHAT_ID": chat_id,
-        "SIGNAL_EMISSION_ENABLED": "false",
+        "SIGNAL_EMISSION_ENABLED": "true" if observe else "false",
     }
+    if observe:
+        settings["ENVIRONMENT"] = "shadow"
+        settings["CROSS_MARKET_ENABLED"] = "false"
     lines = []
     for line in path.read_text().splitlines():
         key = line.split("=", 1)[0].strip()
@@ -68,6 +72,9 @@ def save_settings(path, token, chat_id):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--observe", action="store_true", help="Включить исследовательские уведомления в личный чат")
+    args = parser.parse_args()
     if not sys.stdin.isatty():
         raise SetupError("Запустите настройку в интерактивном SSH-терминале.")
     path = Path(__file__).resolve().parent / ".env"
@@ -98,8 +105,10 @@ def main():
     chat = api(token, f"getChat?chat_id={chat_id}")
     if chat.get("type") != "private":
         raise SetupError("Выбранный чат не является личным.")
-    save_settings(path, token, chat_id)
-    print("Настройки сохранены в deploy/.env (права 600). Отправка сигналов выключена.")
+    save_settings(path, token, chat_id, observe=args.observe)
+    print("Настройки сохранены в deploy/.env (права 600).")
+    print("Режим наблюдения: уведомления включены, оценки исследовательские." if args.observe
+          else "Отправка сигналов выключена.")
     print("Сообщения не отправлялись. Пересоздайте контейнер app для применения настроек.")
 
 

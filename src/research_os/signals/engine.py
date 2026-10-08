@@ -73,11 +73,12 @@ class SignalEngine:
         cost_r = 2 * (self.fee_bps + self.slippage_bps) / 10000 * price / risk
         ev=p*rr1-(1-p)-cost_r
         lev=self.risk.recommended_leverage(price,stop,p)
+        evidence_direction = EvidenceDirection.BULLISH if direction is SignalDirection.LONG else EvidenceDirection.BEARISH
         return SignalResult(
             analysis.symbol,analysis.timestamp,direction,p,probability.no_signal,
             SignalLevels(entry_min,entry_max,stop,t1,t2,t3,rr1,rr2,rr3),
             ev,lev,
-            tuple(e.reason for e in analysis.evidence if e.direction.value == direction.value and e.reason),
+            tuple(e.reason for e in analysis.evidence if e.direction is evidence_direction and e.reason),
             (f"stop source: {levels.stop_source}","market structure may change before entry", "EV is a binary payoff proxy; fees/slippage are assumptions, funding/gaps are unmodeled", *(("target: confirmed TP1 within horizon; expired/ambiguous count as non-success",) if probability.calibrated else ("uncalibrated research score; not a measured success probability",))),
             self.version+":"+probability.model_version, probability_is_calibrated=probability.calibrated,
             research_score=probability.research_score if probability.research_score is not None else p,
