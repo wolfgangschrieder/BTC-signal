@@ -2,9 +2,11 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 compose=(docker compose --env-file deploy/.env -f deploy/compose.yml)
+df -h .
 "${compose[@]}" ps -a
 "${compose[@]}" exec -T app research-os health
 "${compose[@]}" exec -T postgres psql -U research_os -d research_os -c "
+SELECT pg_size_pretty(pg_database_size(current_database())) AS database_size;
 SELECT event_type, count(*) AS events, max(ingestion_time) AS latest_received,
        now()-max(ingestion_time) AS lag
 FROM raw.events WHERE source='bybit' GROUP BY event_type ORDER BY event_type;
