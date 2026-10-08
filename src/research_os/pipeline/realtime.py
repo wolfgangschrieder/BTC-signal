@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
+import logging
 from research_os.intelligence.analyzer import MarketAnalyzer
 from research_os.intelligence.probability import ProbabilityEngine
 from research_os.market.state_vector import MarketStateVector
@@ -46,6 +47,16 @@ class RealtimeSignalPipeline:
             with self.latency.timer("guard"):
                 allowed = self.guard.allow(signal, context)
 
+        reasons = self.guard.validate(signal, context)[1] if not allowed else ()
+        logging.getLogger(__name__).info(
+            "Signal evaluation symbol=%s decision=%s analysis=%s sufficient=%s "
+            "p_long=%.4f p_short=%.4f p_none=%.4f atr=%s direction=%s "
+            "allowed=%s engine_reasons=%s guard_reasons=%s",
+            state.symbol, state.decision_time.isoformat(), analysis.direction.value,
+            analysis.sufficient_data, probability.long, probability.short,
+            probability.no_signal, atr, signal.direction.value, allowed,
+            signal.rationale if signal.direction.value == "none" else (), reasons,
+        )
         message = None
         if allowed:
             message = self.formatter.format(signal)

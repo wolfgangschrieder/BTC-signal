@@ -88,4 +88,9 @@ async def run():
 
 
 def main():
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    logging.getLogger("research_os.pipeline.realtime").setLevel(logging.INFO)
     asyncio.run(run())
