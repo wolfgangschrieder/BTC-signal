@@ -30,6 +30,8 @@ def prune_batch(session, cutoff: datetime, batch_size: int = 1000) -> int:
         return 0
     for table in TABLES:
         session.execute(text(f'DELETE FROM market.{table} WHERE raw_event_id = ANY(:ids)'), {'ids': ids})
+    for table in ('funding_rates', 'open_interest'):
+        session.execute(text(f'DELETE FROM derivatives.{table} WHERE raw_event_id = ANY(:ids)'), {'ids': ids})
     session.execute(text('DELETE FROM raw.event_fingerprints WHERE event_id = ANY(:ids)'), {'ids': ids})
     session.execute(text('DELETE FROM raw.events WHERE id = ANY(:ids)'), {'ids': ids})
     return len(ids)

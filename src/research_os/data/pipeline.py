@@ -17,7 +17,9 @@ class IngestionPipeline:
         self,
         ingestion: EventIngestionService | None = None,
         max_queue_size: int = 10_000,
+        storage_budget=None,
     ) -> None:
+        self.storage_budget = storage_budget
         self._failure: Exception | None = None
         self._failed = asyncio.Event()
         self.ingestion = ingestion or EventIngestionService()
@@ -46,6 +48,8 @@ class IngestionPipeline:
                 self.queue.task_done()
 
     def _persist_one(self, event: RawEvent) -> None:
+        if self.storage_budget is not None:
+            self.storage_budget.require_writable()
         with SessionLocal() as session:
             try:
                 event_id, _ = self.ingestion.ingest(session, event)

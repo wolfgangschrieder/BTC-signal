@@ -42,6 +42,9 @@ services:
       SIGNAL_MIN_EV: ${SIGNAL_MIN_EV:-0.0}
       EXECUTION_FEE_BPS: ${EXECUTION_FEE_BPS:-0}
       EXECUTION_SLIPPAGE_BPS: ${EXECUTION_SLIPPAGE_BPS:-0}
+      STORAGE_PATH: /postgres-storage
+      STORAGE_MAX_DATABASE_GB: ${STORAGE_MAX_DATABASE_GB:-18}
+      STORAGE_MIN_FREE_GB: ${STORAGE_MIN_FREE_GB:-5}
       RAW_RETENTION_HOURS: ${RAW_RETENTION_HOURS:-6}
       SIGNAL_EMISSION_ENABLED: ${SIGNAL_EMISSION_ENABLED:-false}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -50,6 +53,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    volumes:
+      - postgres_data:/postgres-storage:ro
     stop_grace_period: 35s
     logging:
       driver: json-file

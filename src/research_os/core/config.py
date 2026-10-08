@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     bybit_api_key:str=""; bybit_api_secret:str=""
     telegram_bot_token:str=""; telegram_chat_id:str=""
     raw_retention_hours:int=Field(default=0,ge=0)
+    storage_path:str=""
+    storage_max_database_gb:float=Field(default=18,gt=0)
+    storage_min_free_gb:float=Field(default=5,gt=0)
     signal_emission_enabled:bool=True
     signal_min_probability:float=Field(default=.70,ge=0,le=1); signal_min_ev:float=0.0
     signal_guard_max_latency_ms:float=500.0
