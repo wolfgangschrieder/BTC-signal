@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from bisect import bisect_left
 from collections import Counter
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 
 from sqlalchemy import text
@@ -45,7 +45,41 @@ def outcome(direction, entry_bar, bars, atr, fee_bps=5.5, slippage_bps=2.0):
     return 'timeout', net
 
 
+def select_training_threshold(reports):
+    eligible = [(threshold, report) for threshold, report in reports.items()
+                if report['resolved_with_known_return'] >= 20
+                and not report['statuses'].get('ambiguous')
+                and report['mean_net_return_pct'] is not None
+                and report['mean_net_return_pct'] > 0]
+    return max(eligible, key=lambda item: item[1]['mean_net_return_pct'])[0] if eligible else None
+
+
+def holdout_reasons(report):
+    if report is None:
+        return ['no_profitable_training_candidate']
+    reasons = []
+    if report['resolved_with_known_return'] < 20:
+        reasons.append('insufficient_holdout_samples')
+    if report['statuses'].get('ambiguous'):
+        reasons.append('ambiguous_holdout_outcomes')
+    if report['mean_net_return_pct'] is None or report['mean_net_return_pct'] <= 0:
+        reasons.append('nonpositive_holdout_mean_net_return')
+    return reasons
+
+
+def net_target_return(direction, price, atr, fee_bps=5.5, slippage_bps=2.0):
+    long = direction == 'long'
+    entry = price * (1 + slippage_bps/10000 if long else 1 - slippage_bps/10000)
+    target = price + 1.5*atr if long else price - 1.5*atr
+    if entry <= 0 or target <= 0:
+        return None
+    exit_price = target * (1 - slippage_bps/10000 if long else 1 + slippage_bps/10000)
+    return ((exit_price-entry)/entry if long else (entry-exit_price)/entry) - 2*fee_bps/10000
+
+
 def study(rows, candles, horizon=30):
+    if horizon < 1:
+        raise ValueError("horizon must be positive")
     if len(rows) < 2 or not candles:
         return {'error': 'Need at least two saved states and confirmed candles'}
     rows = sorted(rows, key=lambda row: row['decision_time'])
@@ -88,39 +122,52 @@ def study(rows, candles, horizon=30):
         direction = 'long' if analysis.direction is EvidenceDirection.BULLISH else 'short'
         score = prediction.long if direction == 'long' else prediction.short
         status, net = outcome(direction, future[0], future, float(atr))
-        samples[segment].append((score, status, net))
+        target_net = net_target_return(direction, float(future[0]["open"]), float(atr))
+        samples[segment].append((score, status, net, target_net))
     reports = {}
     for segment, data in samples.items():
         reports[segment] = {}
         for threshold in (.4, .5, .6, .7):
-            selected = [(status, net) for score, status, net in data if score >= threshold]
-            known = [net for _, net in selected if net is not None]
+            selected = [(status, net, target_net) for score, status, net, target_net in data if score >= threshold]
+            known = [net for _, net, _ in selected if net is not None]
+            winners = [net for status, net, _ in selected if status == "win" and net is not None]
             reports[segment][str(threshold)] = {
-                'candidates': len(selected), 'statuses': dict(Counter(status for status, _ in selected)),
+                'candidates': len(selected), 'statuses': dict(Counter(status for status, _, _ in selected)),
                 'net_positive': sum(net > 0 for net in known),
+                'tp_wins_with_nonpositive_net_return': sum(net <= 0 for net in winners),
+                'mean_net_return_of_tp_wins_pct': 100*sum(winners)/len(winners) if winners else None,
+                'candidates_with_nonpositive_net_tp_target': sum(target_net is not None and target_net <= 0 for _, _, target_net in selected),
                 'mean_net_return_pct': 100*sum(known)/len(known) if known else None,
                 'resolved_with_known_return': len(known),
             }
-    eligible = [(threshold, report) for threshold, report in reports['train'].items()
-                if report['resolved_with_known_return'] >= 20 and not report['statuses'].get('ambiguous')]
-    chosen = max(eligible, key=lambda item: item[1]['mean_net_return_pct'])[0] if eligible else None
+    chosen = select_training_threshold(reports['train'])
+    selected_holdout = reports['holdout'].get(chosen)
+    rejection_reasons = holdout_reasons(selected_holdout)
     return {'states': len(rows), 'split_utc': split.isoformat(), 'excluded': dict(excluded),
             'reports': reports, 'training_selected_threshold': chosen,
-            'holdout_for_selected_threshold': reports['holdout'].get(chosen),
-            'assumptions': 'Current model rescoring; ATR stop 1x and TP1 1.5x; market entry next candle open; 30 candle horizon; fee 5.5 bps and slippage 2 bps per side. Overlapping independent candidates, no portfolio simulation or live liquidity/latency guard. Ambiguous outcomes excluded from means. No runtime settings changed.'}
+            'holdout_for_selected_threshold': selected_holdout,
+            'research_gate_passed': not rejection_reasons,
+            'rejection_reasons': rejection_reasons,
+            'selection_policy': 'Training mean net return must be positive, with >=20 known returns and no ambiguous outcomes. Freeze that choice before checking holdout with the same gates. Passing is exploratory, not validation of a live strategy or calibrated model.',
+            'assumptions': f'Current model rescoring; ATR stop 1x and TP1 1.5x; market entry next candle open; {horizon} candle horizon; fee 5.5 bps and slippage 2 bps per side. Overlapping independent candidates, no portfolio simulation or live liquidity/latency guard. Ambiguous outcomes excluded from means. No runtime settings changed.'}
 
 
 def main():
+    as_of = datetime.now(UTC)
     with SessionLocal() as session:
+        session.execute(text("SET TRANSACTION READ ONLY"))
+        session.execute(text("SET LOCAL statement_timeout = '5s'"))
         rows = session.execute(text("""SELECT symbol,timestamp,decision_time,point_in_time_available_at,
             vector,data_quality FROM world.market_state_vectors WHERE symbol='BTCUSDT'
-            ORDER BY decision_time DESC LIMIT 10000""")).mappings().all()
+            AND decision_time>=:since AND decision_time<=:now
+            ORDER BY decision_time DESC LIMIT 10000"""), {'since':as_of-timedelta(days=7),'now':as_of}).mappings().all()
         if not rows:
             print(json.dumps({'error': 'No saved BTCUSDT states'}))
             return
         candles = session.execute(text("""SELECT event_time,point_in_time_available_at,open,high,low,close
             FROM market.candles WHERE symbol='BTCUSDT' AND interval='1' AND event_time>=:start
-            ORDER BY event_time"""), {'start': min(row['decision_time'] for row in rows)}).mappings().all()
+            AND event_time<=:now AND point_in_time_available_at<=:now
+            ORDER BY event_time LIMIT 10081"""), {'start': min(row['decision_time'] for row in rows),'now':as_of}).mappings().all()
         print(json.dumps(study(rows, candles), indent=2, ensure_ascii=False))
 
 

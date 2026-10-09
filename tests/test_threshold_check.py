@@ -50,3 +50,38 @@ def test_split_rejects_cross_boundary_and_incomplete_horizons():
     assert result['reports']['holdout']['0.4']['candidates'] == 3
     assert result['training_selected_threshold'] is None
     assert result['reports']['train']['0.7']['candidates'] == 0
+
+
+def threshold_report(mean, samples=30, ambiguous=0):
+    return {'mean_net_return_pct':mean,'resolved_with_known_return':samples,
+            'statuses':{'ambiguous':ambiguous} if ambiguous else {}}
+
+
+def test_training_cannot_select_best_of_losing_thresholds():
+    from research_os.research.threshold_check import select_training_threshold
+    assert select_training_threshold({'0.4':threshold_report(-.15),
+                                      '0.5':threshold_report(-.10)}) is None
+    assert select_training_threshold({'0.5':threshold_report(0)}) is None
+    assert select_training_threshold({'0.4':threshold_report(.1),
+                                      '0.5':threshold_report(.2)}) == '0.5'
+
+
+def test_profitability_needs_sample_and_unambiguous_holdout():
+    from research_os.research.threshold_check import holdout_reasons, select_training_threshold
+    assert select_training_threshold({'0.5':threshold_report(1, samples=19)}) is None
+    assert select_training_threshold({'0.5':threshold_report(1, ambiguous=1)}) is None
+    assert holdout_reasons(None) == ['no_profitable_training_candidate']
+    assert 'nonpositive_holdout_mean_net_return' in holdout_reasons(threshold_report(-.1))
+    assert 'insufficient_holdout_samples' in holdout_reasons(threshold_report(.1, samples=19))
+    assert 'ambiguous_holdout_outcomes' in holdout_reasons(threshold_report(.1, ambiguous=1))
+    assert not holdout_reasons(threshold_report(.1))
+
+
+@pytest.mark.parametrize('direction', ['long', 'short'])
+def test_target_touch_can_lose_money_after_costs(direction):
+    from research_os.research.threshold_check import net_target_return
+    price, atr = 100, .01
+    target = price + 1.5*atr if direction == 'long' else price - 1.5*atr
+    status, net = outcome(direction, bar(), [bar(high=target, low=target)], atr)
+    assert status == 'win' and net < 0
+    assert net_target_return(direction, price, atr) == pytest.approx(net)
