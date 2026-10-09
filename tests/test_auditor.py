@@ -12,7 +12,7 @@ import pytest
 from pydantic import SecretStr, ValidationError
 from sqlalchemy import text
 
-from research_os.auditor.client import DeepSeekAnalyst, prepare_prompt
+from research_os.auditor.client import AnalystOutputLimit, DeepSeekAnalyst, prepare_prompt
 from research_os.auditor.models import AnalystReport, message
 from research_os.auditor.repository import AuditorRepository
 from research_os.auditor.runtime import AuditorService, windows
@@ -69,6 +69,7 @@ async def test_api_returns_validated_json_without_tools():
         assert request.url == 'https://api.deepseek.com/chat/completions'
         body = json.loads(request.content)
         assert body['response_format'] == {'type':'json_object'}
+        assert body['thinking'] == {'type':'disabled'}
         assert 'tools' not in body
         assert 'placeholder-key' not in request.content.decode()
         return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'content':json.dumps(report_data())}}],
@@ -194,3 +195,12 @@ def test_storage_block_prevents_journal_writes():
     with pytest.raises(RuntimeError):
         service._write(service.repository.prune,NOW)
     factory.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_length_stop_is_classified_without_leaking_provider_text():
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={'choices': [{
+        'finish_reason': 'length', 'message': {'content': 'private provider text'}}]}))
+    client = DeepSeekAnalyst('placeholder', 'deepseek-flash', transport=transport)
+    with pytest.raises(AnalystOutputLimit) as error:
+        await client.analyze('{}', {'cohort.completed': 0})
+    assert 'private' not in str(error.value)

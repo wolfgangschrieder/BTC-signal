@@ -26,7 +26,8 @@ findings=[] допустим. Не выдумывай замечания рад�
  "findings":[{"kind":"finding|hypothesis","topic":"data_quality|signal_quality|execution_costs|profitability|delivery|storage|methodology|other",
  "severity":"critical|high|medium|low","statement":"до 500 символов",
  "evidence_ids":["точный идентификатор из evidence"],"verification":"до 500 символов"}]}
-Максимум четыре замечания, максимум шесть оснований на замечание.
+Пиши компактно: комментарий до 600 символов, максимум два наиболее важных замечания,
+statement и verification до 250 символов каждый. Максимум шесть оснований на замечание.
 '''
 
 
@@ -38,6 +39,14 @@ def prepare_prompt(snapshot, previous):
         raise ValueError('Auditor input exceeds byte budget')
     # Conservative byte-based reservation plus message framing and maximum output.
     return payload, size
+
+
+class IncompleteAnalystResponse(ValueError):
+    """Provider did not finish a complete answer; never includes response content."""
+
+
+class AnalystOutputLimit(IncompleteAnalystResponse):
+    """Provider exhausted the configured output budget."""
 
 
 class DeepSeekAnalyst:
@@ -52,6 +61,7 @@ class DeepSeekAnalyst:
                                          'messages': [{'role':'system','content':SYSTEM},
                                                       {'role':'user','content':payload}],
                                          'response_format': {'type':'json_object'},
+                                         'thinking': {'type':'disabled'},
                                          'max_tokens': max_output_tokens,
                                      }) as response:
                 response.raise_for_status()
@@ -63,7 +73,9 @@ class DeepSeekAnalyst:
         result = json.loads(body)
         choice = result['choices'][0]
         if choice.get('finish_reason') != 'stop':
-            raise ValueError('Incomplete analyst response')
+            if choice.get('finish_reason') == 'length':
+                raise AnalystOutputLimit('Incomplete analyst response')
+            raise IncompleteAnalystResponse('Incomplete analyst response')
         report = AnalystReport.model_validate_json(choice['message']['content']).validate_evidence(evidence)
         usage = result.get('usage', {}).get('total_tokens')
         if type(usage) is not int or usage < 1:
