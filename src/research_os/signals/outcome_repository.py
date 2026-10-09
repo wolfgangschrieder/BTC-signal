@@ -18,8 +18,8 @@ class SignalOutcomeRepository:
 
     def summary(self,session:Session,since:datetime)->dict:
         rows=session.execute(text("""SELECT status, count(*) FROM signal_outcomes
-        WHERE resolved_at >= :since AND status IN ('win','loss','expired','ambiguous')
-        GROUP BY status"""),{"since":since}).all()
+        WHERE resolved_at >= :since AND resolved_at <= :until AND status IN ('win','loss','expired','ambiguous')
+        GROUP BY status"""),{"since":since,"until":datetime.now(timezone.utc)}).all()
         counts={str(k):int(v) for k,v in rows}
         wins=counts.get("win",0); losses=counts.get("loss",0)
         expired=counts.get("expired",0); ambiguous=counts.get("ambiguous",0)
@@ -31,6 +31,7 @@ class SignalOutcomeRepository:
             "expired":expired,
             "ambiguous":ambiguous,
             "win_rate":wins/(wins+losses) if wins+losses else None,
+            "tp1_confirmation_fraction":wins/resolved if resolved else None,
         }
 
     def pending(self,session:Session,now:datetime):

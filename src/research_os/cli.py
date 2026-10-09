@@ -176,6 +176,25 @@ def state(symbol=None,history=False,timestamp=None,compare=None):
         print(dict(row[0]) if row else {"status":"not_found"})
     return 0
 
+def bounded_report_integer(value, lower, upper):
+    parsed = int(value)
+    if not lower <= parsed <= upper:
+        raise argparse.ArgumentTypeError(f"value must be between {lower} and {upper}")
+    return parsed
+
+
+def observation_report(symbol, hours, limit):
+    import json
+    from research_os.research.observation_report import build_report
+    settings = get_settings()
+    with SessionLocal() as session:
+        report = build_report(session, symbol=symbol, hours=hours, limit=limit,
+                              threshold=settings.signal_min_probability,
+                              calibrated_models_configured=bool(settings.calibration_model_ids.strip()))
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main():
     parser=argparse.ArgumentParser(prog="research-os")
     sub=parser.add_subparsers(dest="command",required=True)
@@ -184,6 +203,10 @@ def main():
     cm.add_argument("--start")
     cm.add_argument("--end")
     cm.add_argument("--assets",help="comma-separated FRED assets; default: all configured assets")
+    obs=sub.add_parser("observation-report")
+    obs.add_argument("--symbol", default="BTCUSDT")
+    obs.add_argument("--hours", type=lambda value: bounded_report_integer(value,1,168), default=24)
+    obs.add_argument("--limit", type=lambda value: bounded_report_integer(value,1,5000), default=1000)
     st=sub.add_parser("state")
     st.add_argument("--symbol",default="BTCUSDT")
     st.add_argument("--history",action="store_true")
@@ -195,6 +218,7 @@ def main():
     ds=sub.add_parser("dataset"); ds.add_argument("--symbol",default="BTCUSDT"); ds.add_argument("--start",required=True); ds.add_argument("--end",required=True); ds.add_argument("--horizon",default="60")
     rg=sub.add_parser("regime"); rg.add_argument("--symbol",default="BTCUSDT"); rg.add_argument("--start",required=True); rg.add_argument("--end",required=True)
     args=parser.parse_args()
+    if args.command=="observation-report": raise SystemExit(observation_report(args.symbol,args.hours,args.limit))
     if args.command=="health": raise SystemExit(health())
     if args.command=="state": raise SystemExit(state(args.symbol,args.history,args.timestamp,args.compare))
     if args.command=="live":
