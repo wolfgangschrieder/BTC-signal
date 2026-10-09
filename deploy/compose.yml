@@ -66,5 +66,42 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+  auditor:
+    profiles: [auditor]
+    image: btc-signal:local
+    command: ["research-os", "auditor"]
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+    environment:
+      DATABASE_URL: postgresql+psycopg://research_os:${POSTGRES_PASSWORD}@postgres:5432/research_os
+      AUDITOR_ENABLED: ${AUDITOR_ENABLED:-false}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      AUDITOR_MODEL: ${AUDITOR_MODEL:-deepseek-flash}
+      AUDITOR_DAILY_TOKEN_BUDGET: ${AUDITOR_DAILY_TOKEN_BUDGET:-1000000}
+      AUDITOR_MAX_OUTPUT_TOKENS: ${AUDITOR_MAX_OUTPUT_TOKENS:-2200}
+      AUDITOR_RETENTION_DAYS: ${AUDITOR_RETENTION_DAYS:-7}
+      AUDITOR_TELEGRAM_ENABLED: ${AUDITOR_TELEGRAM_ENABLED:-true}
+      SIGNAL_MIN_PROBABILITY: ${SIGNAL_MIN_PROBABILITY:-0.70}
+      CALIBRATION_MODEL_IDS: ${CALIBRATION_MODEL_IDS:-}
+      EXECUTION_FEE_BPS: ${EXECUTION_FEE_BPS:-0}
+      EXECUTION_SLIPPAGE_BPS: ${EXECUTION_SLIPPAGE_BPS:-0}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      STORAGE_PATH: /postgres-storage
+      STORAGE_MAX_DATABASE_GB: ${STORAGE_MAX_DATABASE_GB:-18}
+      STORAGE_MIN_FREE_GB: ${STORAGE_MIN_FREE_GB:-5}
+    volumes:
+      - postgres_data:/postgres-storage:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
 volumes:
   postgres_data:

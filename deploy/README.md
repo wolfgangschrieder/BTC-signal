@@ -229,3 +229,79 @@ open, ATR-stop, TP=1.5 ATR), а не воспроизведение live-лим�
 
 Чтение ограничено последними 7 днями, 10000 states и 10081 свечой, выполняется
 в read-only транзакции с таймаутом 5 секунд на запрос. Исходные данные не удаляются.
+
+### DeepSeek: отдельный аналитик каждые 5 минут
+
+Аналитик — отдельный optional Compose service `auditor`, а не часть live-loop.
+Он читает агрегаты и последние комментарии, получает JSON-интерпретацию DeepSeek,
+проверяет схему, размеры и наличие ссылок на evidence, затем сохраняет отчёт в
+`intelligence.auditor_runs`. Замечания доступны через view
+`intelligence.auditor_findings` (поле finding включает topic/severity/statement/
+evidence_ids/verification). Все записи создаёт Python с фиксированным SQL;
+модель не получает SQL, shell, доступ к исходникам или торговые инструменты.
+Проверка ссылок подтверждает существование метрик, а не истинность рассуждений LLM.
+
+Каждый пятиминутный слот получает одну попытку анализа. Если новых оснований нет,
+модель может дать только комментарий с пустым findings. Комментарии и замечания
+отправляются в настроенный личный Telegram с пометкой интерпретации LLM.
+Суточный разбор предыдущего московского дня создаётся после полуночи; после
+первого включения возможен немедленный разбор предыдущего дня. Он считает метрики
+из БД, а не усредняет часовые/пятиминутные отчёты. Tick использует rolling hour
+(максимум 120 states), daily — 24 часа (максимум 1440 states). Суточное исследование
+порогов использует собственную market/ATR/30-minute baseline и фиксированные
+5.5 bps fee + 2 bps slippage с каждой стороны, не воспроизводит live-исполнение.
+Цель заработка задаёт критерии критики; прибыльность и точность пока не сертифицированы.
+
+Подготовьте **новый** API key на стороне провайдера; отзывайте ключи, опубликованные
+в переписке. В SSH-терминале после обновления кода:
+
+```bash
+python3 deploy/configure-auditor.py
+docker compose --env-file deploy/.env -f deploy/compose.yml build
+docker compose --env-file deploy/.env -f deploy/compose.yml up -d --no-deps --force-recreate migrate
+docker compose --env-file deploy/.env -f deploy/compose.yml logs --tail 20 migrate
+# Продолжать только если migrate завершился Exited (0):
+docker compose --env-file deploy/.env -f deploy/compose.yml --profile auditor up -d --no-deps auditor
+```
+
+Ключ вводится скрыто, сохраняется в существующий deploy/.env с правами 600 и
+передаётся только auditor-контейнеру; app не получает его. Настройка не вызывает
+API. По умолчанию используется `AUDITOR_MODEL=deepseek-flash`, переопределяемый
+в .env. Рабочий образ/API/баланс аккаунта нужно проверить на VPS.
+Google Drive в эту версию не подключён: основное хранилище — PostgreSQL.
+
+Ограничения: запрос не более 16 KB входа и 2200 output tokens (настраивается),
+ответ до 128 KB, общий HTTP timeout 75 секунд. Максимум 290 зарезервированных
+попыток/московские сутки и бюджет 1,000,000 tokens/сутки по умолчанию.
+Перед вызовом атомарно резервируется консервативный byte-based верхний размер
+входа + output limit + framing allowance; при успешном валидном ответе учитывается
+provider total_tokens, при неизвестном расходе сохраняется резерв. Это не денежная
+квота и не обещание определённой цены; учитывайте тариф модели и баланс провайдера.
+При исчерпании бюджета новые вызовы пропускаются. Пустые/оборванные ответы и
+ошибки сохраняются как failed, без provider body и без автоматического повторного
+API-вызова в том же слоте; started после аварийного завершения тоже не переисполняется.
+Расходы не теряются при перезапуске. Для анализа failed/started нужен оператор.
+
+Telegram-доставка имеет lease и до 5 попыток. Пятиминутные сообщения истекают
+через 10 минут после конца слота, суточные через 24 часа. Возможен дубль после
+успешной отправки с потерянным ответом — семантика at-least-once в пределах TTL.
+Повторная доставка не вызывает DeepSeek. Невалидный отчёт не отправляется.
+
+Tick-журнал хранится 7 дней (настраивается 2..14), daily — 90 дней; очистка
+до 500 строк/цикл. Накопление JSON ограничено схемой. Auditor проверяет те же
+18 GB / 5 GB пороги перед записью, не обходит заполненный диск. Compose ограничивает
+процесс 256 MB и 0.5 CPU, логи 2x5 MB. При storage block аналитик пропускает работу;
+приложение торговли/сбора не зависит от API. Оба процесса пока используют текущий
+DB service account; отдельная роль с SQL-привилегиями только на журнал не внедрена.
+
+Проверки (не выводят ключи):
+
+```bash
+docker compose --env-file deploy/.env -f deploy/compose.yml --profile auditor ps -a
+docker compose --env-file deploy/.env -f deploy/compose.yml --profile auditor logs --tail 40 auditor
+docker compose --env-file deploy/.env -f deploy/compose.yml exec -T postgres \
+  psql -U research_os -d research_os -c "SELECT kind,period_end,status,tokens,error_type,sent_at FROM intelligence.auditor_runs ORDER BY created_at DESC LIMIT 10;"
+```
+
+Не публикуйте `docker compose config`, полные environment dumps или .env: они
+могут раскрыть credentials. Для отключения: `--profile auditor stop auditor`.

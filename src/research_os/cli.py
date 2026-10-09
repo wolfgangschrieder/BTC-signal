@@ -198,7 +198,7 @@ def observation_report(symbol, hours, limit):
 def main():
     parser=argparse.ArgumentParser(prog="research-os")
     sub=parser.add_subparsers(dest="command",required=True)
-    sub.add_parser("health"); sub.add_parser("live")
+    sub.add_parser("health"); sub.add_parser("live"); sub.add_parser("auditor")
     cm=sub.add_parser("cross-market")
     cm.add_argument("--start")
     cm.add_argument("--end")
@@ -221,6 +221,9 @@ def main():
     if args.command=="observation-report": raise SystemExit(observation_report(args.symbol,args.hours,args.limit))
     if args.command=="health": raise SystemExit(health())
     if args.command=="state": raise SystemExit(state(args.symbol,args.history,args.timestamp,args.compare))
+    if args.command=="auditor":
+        from research_os.auditor.runtime import main as auditor_main
+        auditor_main()
     if args.command=="live":
         from research_os.pipeline.runtime import main as live_main
         live_main()

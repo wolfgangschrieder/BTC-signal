@@ -1,5 +1,5 @@
 from functools import lru_cache
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings,SettingsConfigDict
 class Settings(BaseSettings):
     model_config=SettingsConfigDict(env_file=".env",env_file_encoding="utf-8",extra="ignore")
@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     execution_fee_bps:float=Field(default=0.0,ge=0)
     execution_slippage_bps:float=Field(default=0.0,ge=0)
     report_timezone:str="Europe/Moscow"; report_hour:int=20; report_minute:int=0
+    deepseek_api_key:SecretStr=Field(default=SecretStr(""),repr=False)
+    auditor_enabled:bool=False
+    auditor_model:str=Field(default="deepseek-flash",min_length=1,max_length=64,pattern=r"^deepseek-[A-Za-z0-9_-]+$")
+    auditor_daily_token_budget:int=Field(default=1_000_000,ge=20_000,le=20_000_000)
+    auditor_max_output_tokens:int=Field(default=2200,ge=500,le=3000)
+    auditor_retention_days:int=Field(default=7,ge=2,le=14)
+    auditor_telegram_enabled:bool=True
     fred_api_key:str=""
     cross_market_enabled:bool=False
     cross_market_refresh_seconds:int=Field(default=60,ge=10)
