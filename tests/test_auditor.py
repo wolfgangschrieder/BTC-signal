@@ -204,3 +204,18 @@ async def test_length_stop_is_classified_without_leaking_provider_text():
     with pytest.raises(AnalystOutputLimit) as error:
         await client.analyze('{}', {'cohort.completed': 0})
     assert 'private' not in str(error.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('extra,accepted', [('limits', True), ('unexpected', False)])
+async def test_optional_limits_metadata_is_discarded_but_other_extra_fields_fail(extra, accepted):
+    data = {**report_data(), extra: {'note': 'untrusted optional metadata'}}
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={'choices': [{
+        'finish_reason': 'stop', 'message': {'content': json.dumps(data)}}]}))
+    client = DeepSeekAnalyst('placeholder', 'deepseek-flash', transport=transport)
+    if accepted:
+        report, _ = await client.analyze('{}', {'cohort.completed': 0})
+        assert report.model_dump() == report_data()
+    else:
+        with pytest.raises(ValidationError):
+            await client.analyze('{}', {'cohort.completed': 0})
