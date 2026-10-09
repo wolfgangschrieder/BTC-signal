@@ -16,6 +16,10 @@ class StatisticsScheduler:
     def _next(self,now):
         target=now.replace(hour=self.hour,minute=self.minute,second=0,microsecond=0)
         return target if target>now else target+timedelta(days=1)
+    def _build_reports(self, weekly):
+        with SessionLocal() as session:
+            return self.reporter.daily(session), self.reporter.weekly(session) if weekly else None
+
     async def run(self,stop:asyncio.Event|None=None):
         stop=stop or asyncio.Event()
         while not stop.is_set():
@@ -25,10 +29,8 @@ class StatisticsScheduler:
             if stop.is_set(): break
             weekly=datetime.now(self.tz).weekday()==6
             try:
-                with SessionLocal() as session:
-                    daily=self.reporter.daily(session)
-                    weekly_text=self.reporter.weekly(session) if weekly else None
+                daily, weekly_text = await asyncio.to_thread(self._build_reports, weekly)
                 await self.telegram.send(daily)
                 if weekly_text: await self.telegram.send(weekly_text)
-            except Exception:
-                logger.exception("Statistics report cycle failed; scheduler will continue")
+            except Exception as error:  # noqa: BLE001 - periodic optional report retries next cycle
+                logger.error("Statistics report cycle failed (%s); scheduler will continue", type(error).__name__)
