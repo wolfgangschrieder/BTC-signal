@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from sqlalchemy import text
 
+from research_os.features.timeframes import Timeframe
 from research_os.research.observation_report import build_report
 from research_os.research.threshold_check import study
 
@@ -17,7 +18,11 @@ def collect_snapshot(session, end, kind, settings):
     cohort = report['emitted_forecast_cohort']
     evidence = {
         'window.start_utc': report['since_utc'], 'window.end_utc': end.isoformat(),
-        'window.hours': hours, 'sample.states': sample['states'],
+        'window.hours': hours,
+        'system.supported_timeframes': [str(item) for item in Timeframe],
+        'system.live_history_minutes': settings.live_history_minutes,
+        'system.costs_apply_to': 'EV proxy and simulated net returns, not directional raw score',
+        'system.feature_absence_interpretation': 'May be insufficient closed bars/history; does not prove source failure', 'sample.states': sample['states'],
         'sample.truncated': report['state_sample_may_be_truncated'],
         'sample.last_decision_utc': sample['last_decision'],
         'sample.raw_score_max': sample['directional_score']['max'],
@@ -66,7 +71,7 @@ def collect_snapshot(session, end, kind, settings):
             evidence[f'baseline.holdout.{threshold}.candidates'] = record.get('candidates',0)
             evidence[f'baseline.holdout.{threshold}.mean_net_return_pct'] = record.get('mean_net_return_pct')
     return {'evidence':evidence, 'limitations': report['limitations'] +
-            ' Tick context is a rolling hour, capped at 120 states; daily context is 24 hours capped at 1440 states. '
+            ' Sampling interval is 30 minutes; tick context is a rolling hour, capped at 120 states; daily context is 24 hours capped at 1440 states. '
             'Telegram backlog and database size are current reads, not backdated daily measurements. '
             'The daily baseline has market entry, 30-minute horizon, ATR levels and fee/slippage '
             '5.5/2 bps per side, not live midpoint/60-minute execution. No repository code audit is performed.'}

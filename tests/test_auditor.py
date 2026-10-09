@@ -13,7 +13,7 @@ from pydantic import SecretStr, ValidationError
 from sqlalchemy import text
 
 from research_os.auditor.client import AnalystOutputLimit, DeepSeekAnalyst, prepare_prompt
-from research_os.auditor.models import AnalystReport, message
+from research_os.auditor.models import AnalystReport, message, message_parts
 from research_os.auditor.repository import AuditorRepository
 from research_os.auditor.runtime import AuditorService, windows
 from research_os.core.config import Settings
@@ -50,9 +50,9 @@ def test_idle_comment_is_valid_and_telegram_is_bounded():
     assert not report.findings
 
 
-def test_periods_align_to_five_minutes_and_previous_moscow_day():
+def test_periods_align_to_thirty_minutes_and_previous_moscow_day():
     tick, daily = windows(NOW)
-    assert tick == ('tick',datetime(2026,10,9,20,55,tzinfo=UTC),datetime(2026,10,9,21,tzinfo=UTC))
+    assert tick == ('tick',datetime(2026,10,9,20,30,tzinfo=UTC),datetime(2026,10,9,21,tzinfo=UTC))
     assert daily == ('daily',datetime(2026,10,8,21,tzinfo=UTC),datetime(2026,10,9,21,tzinfo=UTC))
 
 
@@ -219,3 +219,83 @@ async def test_optional_limits_metadata_is_discarded_but_other_extra_fields_fail
     else:
         with pytest.raises(ValidationError):
             await client.analyze('{}', {'cohort.completed': 0})
+
+
+def test_multipart_keeps_all_unicode_and_labels_each_part():
+    body = ('😀 данные\n' * 1200)
+    parts = message_parts(body)
+    assert len(parts) > 1
+    assert ''.join(part.split('\n', 1)[1] for part in parts) == body
+    assert all(len(part.encode('utf-16-le')) // 2 <= 3500 for part in parts)
+    assert message_parts('short') == ['short']
+
+
+def test_full_message_is_not_truncated():
+    data = report_data()
+    data['findings'] = [{'kind': 'finding', 'topic': 'methodology', 'severity': 'medium',
+                        'statement': 'я' * 500, 'evidence_ids': ['cohort.completed'],
+                        'verification': 'п' * 500} for _ in range(4)]
+    body = message(AnalystReport.model_validate(data), 'tick', NOW, NOW, {'cohort.completed': 0})
+    assert len(body) > 3500
+    assert body.endswith('п' * 500)
+    assert len(message_parts(body)) > 1
+
+
+@pytest.mark.asyncio
+async def test_delivery_resumes_at_persisted_part(monkeypatch):
+    sent, calls = [], []
+    class Telegram:
+        async def send(self, body):
+            sent.append(body)
+    settings = SimpleNamespace(deepseek_api_key=SecretStr(''), auditor_model='deepseek-flash')
+    service = AuditorService(settings, telegram=Telegram())
+    body = 'я' * 7000
+    def write(method, *args):
+        calls.append((method.__name__, args))
+        if method.__name__ == 'claim':
+            return {'message': body, 'message_part': 1}
+    monkeypatch.setattr(service, '_write', write)
+    await service.deliver_once()
+    assert sent == [message_parts(body)[1]]
+    assert calls[-1] == ('delivered', ({'message': body, 'message_part': 1}, True))
+
+
+@pytest.mark.skipif(not os.getenv('DATABASE_URL'), reason='requires migrated PostgreSQL')
+def test_delivery_cursor_advances_and_full_report_survives():
+    now = datetime.now(UTC)
+    repo = AuditorRepository()
+    with SessionLocal() as session:
+        try:
+            identity = repo.reserve(session, kind='tick', start=now-timedelta(minutes=30),
+                                    end=now, snapshot={'evidence': {}}, model='test', tokens=10,
+                                    budget_start=now-timedelta(seconds=1),
+                                    budget_end=now+timedelta(days=1), daily_budget=100)
+            repo.complete(session, identity, AnalystReport.model_validate(report_data()), 'я'*7000, 10)
+            first = repo.claim(session)
+            repo.delivered(session, first, True)
+            second = repo.claim(session)
+            assert second['message_part'] == 1 and second['attempts'] == 1
+            assert len(second['message']) == 7000
+            repo.delivered(session, second)
+            assert repo.claim(session) is None
+        finally:
+            session.rollback()
+
+
+def test_saved_report_reads_full_json_without_external_calls(monkeypatch, capsys):
+    from research_os.auditor import report as module
+    data = report_data()
+    data['findings'] = [{'kind': 'finding', 'topic': 'methodology', 'severity': 'medium',
+                        'statement': 'я' * 500, 'evidence_ids': ['cohort.completed'],
+                        'verification': 'п' * 500} for _ in range(4)]
+    row = {'run_id': 'saved', 'kind': 'tick', 'period_start': NOW, 'period_end': NOW,
+           'report': data, 'snapshot': {'evidence': {'cohort.completed': 0}}}
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.execute.return_value.mappings.return_value.first.return_value = row
+    monkeypatch.setattr(module, 'SessionLocal', lambda: session)
+    assert module.saved_report() == 0
+    output = capsys.readouterr().out
+    assert len(output) > 3500 and output.rstrip().endswith('п' * 500)
+    session.commit.assert_not_called()
+    assert 'READ ONLY' in str(session.execute.call_args_list[0].args[0])

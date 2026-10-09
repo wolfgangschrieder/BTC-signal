@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 
 from research_os.auditor.client import DeepSeekAnalyst, prepare_prompt
-from research_os.auditor.models import message
+from research_os.auditor.models import message, message_parts
 from research_os.auditor.repository import AuditorRepository
 from research_os.auditor.snapshot import collect_snapshot
 from research_os.core.config import get_settings
@@ -19,7 +19,7 @@ from research_os.pipeline.storage import StorageBudget
 
 logger = logging.getLogger(__name__)
 MOSCOW = ZoneInfo('Europe/Moscow')
-INTERVAL = 300
+INTERVAL = 1800
 
 
 def windows(now):
@@ -57,7 +57,7 @@ class AuditorService:
     def _snapshot(self, kind, end):
         with self.session_factory() as session:
             snapshot = collect_snapshot(session, end, kind, self.settings)
-            previous = self.repository.previous(session)
+            previous = self.repository.previous(session, kind)
         return snapshot, previous
 
     async def audit(self, kind, start, end, now):
@@ -79,6 +79,7 @@ class AuditorService:
                 self.analyst.analyze(payload, snapshot['evidence'], self.settings.auditor_max_output_tokens), timeout=75)
             text_message = message(report, kind, start, end, snapshot['evidence'])
             await asyncio.to_thread(self._write, self.repository.complete, identity, report, text_message, usage)
+            logger.info("Auditor report saved id=%s kind=%s parts=%s", identity, kind, len(message_parts(text_message)))
         except Exception as error:  # noqa: BLE001 - preserve spent reservation; never log provider body/key
             await asyncio.to_thread(self._write, self.repository.fail, identity, error)
             logger.warning('Auditor analysis failed (%s)', type(error).__name__)
@@ -90,11 +91,14 @@ class AuditorService:
         if item is None:
             return
         try:
-            await asyncio.wait_for(self.telegram.send(item['message']), timeout=20)
+            parts = message_parts(item['message'])
+            index = item.get('message_part', 0)
+            await asyncio.wait_for(self.telegram.send(parts[index]), timeout=20)
         except Exception as error:  # noqa: BLE001 - store exception type only
             await asyncio.to_thread(self._write, self.repository.retry, item, error)
         else:
-            await asyncio.to_thread(self._write, self.repository.delivered, item)
+            await asyncio.to_thread(self._write, self.repository.delivered, item, index + 1 < len(parts))
+            logger.info("Auditor Telegram part delivered part=%s total=%s", index + 1, len(parts))
 
     async def delivery_loop(self, stop):
         while not stop.is_set():
