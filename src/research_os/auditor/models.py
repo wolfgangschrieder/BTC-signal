@@ -42,19 +42,33 @@ class AnalystReport(BaseModel):
 
 
 def message(report: AnalystReport, kind: str, start, end, evidence=None):
-    heading = 'СУТОЧНЫЙ РАЗБОР' if kind == 'daily' else 'АНАЛИТИК · 5 МИНУТ'
-    lines = [f'🔬 {heading}', f'Период UTC: {start:%d.%m %H:%M}–{end:%d.%m %H:%M}',
+    heading = 'СУТОЧНЫЙ РАЗБОР' if kind == 'daily' else 'АНАЛИТИК · 30 МИНУТ'
+    lines = [f'🔬 {heading}', f'Интервал отчёта UTC: {start:%d.%m %H:%M}–{end:%d.%m %H:%M}',
              'Цель: проверять предпосылки доходности после затрат.',
              'Интерпретация DeepSeek; выводы требуют проверки.', '', report.comment]
     if evidence is not None:
+        lines.insert(2, f"Окно данных UTC: {evidence.get('window.start_utc', '?')} — {evidence.get('window.end_utc', '?')}")
         lines.append('Основания комментария: ' + ', '.join(f'{key}={str(evidence[key])[:80]}' for key in report.comment_evidence_ids))
     for finding in report.findings:
         label = 'Гипотеза' if finding.kind == 'hypothesis' else 'Замечание'
         lines.extend(['', f'{label} [{finding.severity}]: {finding.statement}',
                       f'Основания: {", ".join(finding.evidence_ids)}',
                       f'Проверка: {finding.verification}'])
-    # Telegram has a 4096-character limit; keep space for Unicode code units.
-    result = '\n'.join(lines)
-    while len(result.encode('utf-16-le')) // 2 > 3500:
-        result = result[:-1]
-    return result
+    return '\n'.join(lines)
+
+
+def message_parts(body: str) -> list[str]:
+    # Keep all text, including whitespace and supplementary Unicode characters.
+    chunks, current, units = [], [], 0
+    for character in body:
+        width = len(character.encode('utf-16-le')) // 2
+        if units + width > 3400:
+            chunks.append(''.join(current))
+            current, units = [], 0
+        current.append(character)
+        units += width
+    if current:
+        chunks.append(''.join(current))
+    if len(chunks) <= 1:
+        return chunks
+    return [f'Часть {index}/{len(chunks)}\n{chunk}' for index, chunk in enumerate(chunks, 1)]
