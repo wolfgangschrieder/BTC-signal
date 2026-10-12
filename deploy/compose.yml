@@ -116,6 +116,7 @@ services:
       DRIVE_EXPORT_FOLDER_ID: ${DRIVE_EXPORT_FOLDER_ID:-}
       DRIVE_EXPORT_JSON_ID: ${DRIVE_EXPORT_JSON_ID:-}
       DRIVE_EXPORT_TEXT_ID: ${DRIVE_EXPORT_TEXT_ID:-}
+      DRIVE_RESEARCH_INBOX_ID: ${DRIVE_RESEARCH_INBOX_ID:-}
     volumes:
       - type: bind
         source: ${DRIVE_EXPORT_KEY_PATH:-./secrets/drive-service-account.json}

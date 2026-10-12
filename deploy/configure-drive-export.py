@@ -9,11 +9,12 @@ import tempfile
 from pathlib import Path
 
 
-def setup(source, env, folder, json_id, text_id):
-    for value in (folder,json_id,text_id):
+def setup(source, env, folder, json_id, text_id, inbox_id=None):
+    identities = (folder,json_id,text_id) if inbox_id is None else (folder,json_id,text_id,inbox_id)
+    for value in identities:
         if not re.fullmatch(r'[A-Za-z0-9_-]{10,160}',value):
             raise ValueError('Invalid file identifier')
-    if len({folder,json_id,text_id})!=3 or source.is_symlink() or not source.is_file():
+    if len(set(identities))!=len(identities) or source.is_symlink() or not source.is_file():
         raise ValueError('Expected distinct IDs and a regular key file')
     if source.stat().st_size>32000 or env.is_symlink() or not env.is_file():
         raise ValueError('Invalid setup files')
@@ -44,6 +45,8 @@ def setup(source, env, folder, json_id, text_id):
             os.unlink(temporary)
     updates = {'DRIVE_EXPORT_KEY_PATH':str(destination.resolve()),'DRIVE_EXPORT_FOLDER_ID':folder,
                'DRIVE_EXPORT_JSON_ID':json_id,'DRIVE_EXPORT_TEXT_ID':text_id}
+    if inbox_id is not None:
+        updates['DRIVE_RESEARCH_INBOX_ID'] = inbox_id
     lines = [line for line in env.read_text().splitlines() if line.split('=',1)[0].strip() not in updates]
     lines.extend(f'{key}={value}' for key,value in updates.items())
     descriptor, temporary = tempfile.mkstemp(dir=env.parent,prefix='.drive-env-')
@@ -65,9 +68,10 @@ def main():
     parser.add_argument('--folder',required=True)
     parser.add_argument('--json-file',required=True)
     parser.add_argument('--text-file',required=True)
+    parser.add_argument('--inbox-file',help='Optional private research-inbox.json ID')
     args = parser.parse_args()
     try:
-        email = setup(args.key_file,Path(__file__).resolve().parent/'.env',args.folder,args.json_file,args.text_file)
+        email = setup(args.key_file,Path(__file__).resolve().parent/'.env',args.folder,args.json_file,args.text_file,args.inbox_file)
     except Exception:  # noqa: BLE001 - never print private-key content through parser errors
         print('Настройка не завершена. Проверьте JSON-ключ, IDs и права root.')
         return 1
