@@ -14,3 +14,4 @@ build/
 .vscode/
 
 deploy/secrets/
+deploy/.drive-env-*

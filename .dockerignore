@@ -13,3 +13,4 @@ build
 dist
 
 deploy/secrets
+deploy/.drive-env-*
