@@ -10,7 +10,7 @@ depends_on = None
 def upgrade():
     op.execute("ALTER TABLE intelligence.auditor_runs ADD COLUMN delivery_message TEXT CHECK (delivery_message IS NULL OR char_length(delivery_message)<=3500)")
     op.execute("ALTER TABLE intelligence.auditor_runs DROP CONSTRAINT auditor_runs_kind_check")
-    op.execute("ALTER TABLE intelligence.auditor_runs ADD CONSTRAINT auditor_runs_kind_check CHECK (kind IN ('tick','daily','alert'))")
+    op.execute("ALTER TABLE intelligence.auditor_runs ADD CONSTRAINT auditor_runs_kind_check CHECK (kind IN ('tick','periodic','daily','alert'))")
     op.execute("""CREATE TABLE intelligence.auditor_tasks (
         task_id UUID PRIMARY KEY, dedup_key VARCHAR(160) NOT NULL UNIQUE,
         kind TEXT NOT NULL CHECK (kind IN ('data_quality','signal_review','experiment','hypothesis','costs')),

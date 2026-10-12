@@ -104,5 +104,5 @@ class AuditorRepository:
         session.execute(text("SET LOCAL statement_timeout = '5s'"))
         session.execute(text('''DELETE FROM intelligence.auditor_runs WHERE run_id IN (
             SELECT run_id FROM intelligence.auditor_runs
-            WHERE (kind IN ('tick','alert') AND created_at<:ticks) OR (kind='daily' AND created_at<:daily)
+            WHERE (kind IN ('tick','periodic','alert') AND created_at<:ticks) OR (kind='daily' AND created_at<:daily)
             ORDER BY created_at LIMIT 500)'''), {'ticks':now-timedelta(days=days),'daily':now-timedelta(days=90)})

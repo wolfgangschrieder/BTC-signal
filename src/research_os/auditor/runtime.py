@@ -28,7 +28,7 @@ def windows(now):
     local = now.astimezone(MOSCOW)
     end = local.replace(hour=local.hour // 4 * 4, minute=0, second=0, microsecond=0).astimezone(UTC)
     day_end = end.astimezone(MOSCOW).replace(hour=0, minute=0, second=0, microsecond=0)
-    return [('tick', end-timedelta(seconds=INTERVAL), end),
+    return [('periodic', end-timedelta(seconds=INTERVAL), end),
             ('daily', (day_end-timedelta(days=1)).astimezone(UTC), day_end.astimezone(UTC))]
 
 
@@ -62,7 +62,7 @@ class AuditorService:
         with self.session_factory() as session:
             snapshot = collect_snapshot(session, end, kind, self.settings)
             previous = self.repository.previous(session, kind)
-            if kind == 'tick':
+            if kind == 'periodic':
                 snapshot['tasks'] = self.tasks.pending(session)
                 for task in snapshot['tasks']:
                     for key, value in task['context'].items():

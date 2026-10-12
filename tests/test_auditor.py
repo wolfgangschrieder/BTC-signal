@@ -52,7 +52,7 @@ def test_idle_comment_is_valid_and_telegram_is_bounded():
 
 def test_periods_align_to_four_hours_moscow_and_previous_day():
     tick, daily = windows(NOW)
-    assert tick == ('tick',datetime(2026,10,9,17,tzinfo=UTC),datetime(2026,10,9,21,tzinfo=UTC))
+    assert tick == ('periodic',datetime(2026,10,9,17,tzinfo=UTC),datetime(2026,10,9,21,tzinfo=UTC))
     assert daily == ('daily',datetime(2026,10,8,21,tzinfo=UTC),datetime(2026,10,9,21,tzinfo=UTC))
 
 

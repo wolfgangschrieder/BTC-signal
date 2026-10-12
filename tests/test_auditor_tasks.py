@@ -119,3 +119,18 @@ def test_crashed_tasks_fail_without_automatic_paid_retry():
             assert session.execute(text('SELECT status FROM intelligence.auditor_runs WHERE run_id=CAST(:id AS uuid)'),{'id':run}).scalar_one()=='started'
         finally:
             session.rollback()
+
+
+@pytest.mark.skipif(not os.getenv('DATABASE_URL'),reason='requires migrated PostgreSQL')
+def test_old_halfhour_slot_does_not_block_new_fourhour_report():
+    now = datetime.now(UTC)
+    repo = AuditorRepository()
+    with SessionLocal() as session:
+        try:
+            arguments = {'start':now-timedelta(hours=4),'snapshot':{},'model':'test','tokens':10,
+                         'budget_start':now-timedelta(seconds=1),'budget_end':now+timedelta(days=1),
+                         'daily_budget':1000}
+            assert repo.reserve(session,kind='tick',end=now-timedelta(hours=3,minutes=30),**arguments)
+            assert repo.reserve(session,kind='periodic',end=now,**arguments)
+        finally:
+            session.rollback()
