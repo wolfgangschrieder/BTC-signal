@@ -6,12 +6,13 @@ from uuid import uuid4
 from sqlalchemy import text
 
 QUESTIONS = {
-    'data_quality': 'Explain changes in timeframe availability; distinguish missing history from source failure. State missing evidence and a falsifiable next check.',
-    'signal_review': 'Review the saved hypothetical signal outcome and ambiguity reason. Do not infer execution or profitability from a TP touch.',
-    'experiment': 'Design an ablation: technical analysis only, microstructure only, combined; identical costs and time splits, no holdout parameter selection. Propose a test, do not invent results.',
-    'hypothesis': 'Propose at most one falsifiable research hypothesis supported by evidence. Specify baseline, out-of-sample test and rejection criterion; insufficient_data is valid.',
-    'costs': 'Identify missing execution costs and propose explicit sensitivity scenarios. No actual fees are supplied; do not invent account-specific rates.',
+    'data_quality': 'ASSESS observations: distinguish missing history from source failure. No cause is proven by absent features alone; specify a falsifiable next check.',
+    'signal_review': 'ASSESS saved hypothetical outcome and ambiguity reason. Do not infer actual execution or profitability from a TP touch.',
+    'experiment': 'DESIGN ONLY: use project.feature_groups and project.experiment_protocol to specify TA-only / microstructure-only / combined comparison, fixed costs, chronological splits and net-risk metrics. Outcomes are not required to design it. completed means plan delivered, never experiment executed.',
+    'hypothesis': 'DESIGN ONLY: propose one untested, falsifiable hypothesis motivated by current evidence or project feature groups, baseline, test and rejection criterion based on net returns/risk. No outcomes are required to formulate it; never claim confirmation.',
+    'costs': 'DESIGN ONLY: inventory fees, spread/slippage, funding and manual-entry delay for perpetual. Use project.cost_scenarios as explicitly hypothetical sensitivity assumptions, not account tariffs. Unknown live tariffs do not prevent a plan; never invent measured costs or spot borrow fees.',
 }
+
 
 
 class TaskRepository:
@@ -30,6 +31,15 @@ class TaskRepository:
             WHERE status='waiting' ORDER BY priority,created_at LIMIT 3""")).mappings().all()
         return [{'task_id':str(row['task_id']), 'kind':row['kind'],
                  'question':QUESTIONS[row['kind']], 'context':row['context']} for row in rows]
+
+    def recent(self, session):
+        rows = session.execute(text("""SELECT task_id,kind,status,result,updated_at
+            FROM intelligence.auditor_tasks WHERE status IN ('completed','insufficient_data','failed')
+            ORDER BY updated_at DESC,task_id DESC LIMIT 3""")).mappings().all()
+        return [{'task_id':str(row['task_id']),'kind':row['kind'],'status':row['status'],
+                 'conclusion':(row['result'] or {}).get('conclusion','')[:180],
+                 'next_check':(row['result'] or {}).get('next_check','')[:120]}
+                for row in rows]
 
     def finish(self, session, identity, results):
         for result in results:
@@ -53,15 +63,15 @@ class TaskRepository:
 
 def discover_tasks(session, evidence, now, repo):
     day = now.date().isoformat()
-    repo.enqueue(session,'experiment','initial-ablation-v1',{'goal':'Compare feature groups with realistic costs; design only.'},3)
+    repo.enqueue(session,'experiment','initial-ablation-v2',{'goal':'Compare feature groups with realistic costs; design only.'},3)
     if evidence['settings.fee_bps_assumed']==0 or evidence['settings.slippage_bps_assumed']==0:
-        repo.enqueue(session,'costs','zero-costs-v1',{'fee_bps':evidence['settings.fee_bps_assumed'],
+        repo.enqueue(session,'costs','zero-costs-v2',{'fee_bps':evidence['settings.fee_bps_assumed'],
                      'slippage_bps':evidence['settings.slippage_bps_assumed']},1)
     states = evidence['sample.states']
     if states and any(evidence[f'sample.feature_available.{tf}']==0 for tf in ('tf_1h_return_1','tf_4h_return_1')):
         repo.enqueue(session,'data_quality','timeframe-history:'+day,{'states':states,
                      'available':{tf:evidence[f'sample.feature_available.{tf}'] for tf in ('tf_1h_return_1','tf_4h_return_1')}},1)
-    repo.enqueue(session,'hypothesis','hypothesis:'+day,{'scope':'Current observed data; no profitability claim'},3)
+    repo.enqueue(session,'hypothesis','hypothesis-v2:'+day,{'scope':'Current observed data; no profitability claim'},3)
     rows = session.execute(text("""SELECT signal_id,signal_time,direction,status,reason,execution_policy,
         entry_price,stop_loss,tp1,fee_bps,slippage_bps FROM signal_outcomes
         WHERE signal_time>=:lower AND status<>'pending' ORDER BY signal_time DESC LIMIT 20"""),

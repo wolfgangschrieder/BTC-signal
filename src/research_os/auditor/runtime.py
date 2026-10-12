@@ -62,6 +62,7 @@ class AuditorService:
         with self.session_factory() as session:
             snapshot = collect_snapshot(session, end, kind, self.settings)
             previous = self.repository.previous(session, kind)
+            snapshot['task_history'] = self.tasks.recent(session)
             if kind == 'periodic':
                 snapshot['tasks'] = self.tasks.pending(session)
                 for task in snapshot['tasks']:

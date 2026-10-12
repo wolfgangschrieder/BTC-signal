@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from sqlalchemy import text
 
+from research_os.auditor.context import project_evidence
 from research_os.features.timeframes import Timeframe
 from research_os.research.observation_report import build_report
 from research_os.research.threshold_check import study
@@ -35,6 +36,7 @@ def collect_snapshot(session, end, kind, settings):
         'cohort.completed': cohort['completed'],
         'cohort.tp1_confirmation_fraction': cohort['confirmed_tp1_fraction_among_completed'],
     }
+    evidence.update(project_evidence())
     for direction in ('bullish','bearish','conflicting','neutral'):
         evidence[f'sample.direction.{direction}'] = sample['analysis_directions'].get(direction, 0)
     for status in ('pending','win','loss','expired','ambiguous'):
