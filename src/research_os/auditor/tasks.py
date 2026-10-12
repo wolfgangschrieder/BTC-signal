@@ -27,13 +27,10 @@ class TaskRepository:
              'context':json.dumps(context,ensure_ascii=False)}).scalar_one_or_none()
 
     def pending(self, session):
-        session.execute(text("""UPDATE intelligence.auditor_tasks
-            SET status='failed',updated_at=clock_timestamp(),
-                result='{"reason":"request_expired_before_assignment"}'::jsonb
-            WHERE status='waiting' AND context->>'source'='drive'
-                AND (context->'request'->>'expires_at_utc')::timestamptz<=clock_timestamp()"""))
         rows = session.execute(text("""SELECT task_id,kind,context FROM intelligence.auditor_tasks
-            WHERE status='waiting' ORDER BY priority,created_at LIMIT 3""")).mappings().all()
+            WHERE status='waiting' AND (context->>'source' IS DISTINCT FROM 'drive'
+                OR (context->'request'->>'expires_at_utc')::timestamptz>clock_timestamp())
+            ORDER BY priority,created_at LIMIT 3""")).mappings().all()
         return [{'task_id':str(row['task_id']), 'kind':row['kind'],
                  'question':QUESTIONS[row['kind']], 'context':row['context']} for row in rows]
 
@@ -58,6 +55,11 @@ class TaskRepository:
             WHERE run_id=CAST(:id AS uuid) AND status='running'"""), {'id':identity})
 
     def prune(self, session, now):
+        session.execute(text("""UPDATE intelligence.auditor_tasks
+            SET status='failed',updated_at=:now,
+                result='{"reason":"request_expired_before_assignment"}'::jsonb
+            WHERE status='waiting' AND context->>'source'='drive'
+                AND (context->'request'->>'expires_at_utc')::timestamptz<=:now"""),{'now':now})
         # Crashed/unknown-spend tasks are not silently retried with a second API call.
         session.execute(text("""UPDATE intelligence.auditor_tasks SET status='failed',updated_at=:now
             WHERE status='running' AND updated_at<:stale"""), {'now':now,'stale':now-timedelta(minutes=10)})
