@@ -110,4 +110,5 @@ def main():
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     logging.getLogger("research_os.pipeline.realtime").setLevel(logging.INFO)
+    logging.getLogger("research_os.pipeline.live").setLevel(logging.INFO)
     asyncio.run(run())

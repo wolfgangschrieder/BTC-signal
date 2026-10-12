@@ -81,7 +81,7 @@ def collect_snapshot(session, end, kind, settings):
             evidence[f'baseline.holdout.{threshold}.candidates'] = record.get('candidates',0)
             evidence[f'baseline.holdout.{threshold}.mean_net_return_pct'] = record.get('mean_net_return_pct')
     return {'evidence':evidence, 'limitations': report['limitations'] +
-            ' Reports every four hours; tick context is four hours, capped at 240 states; monitoring is 30 minutes; daily context is 24 hours capped at 1440 states. '
+            ' Reports every four hours; tick context is four hours, capped at 240 states; monitoring is 5 minutes; daily context is 24 hours capped at 1440 states. '
             'Telegram backlog and database size are current reads, not backdated daily measurements. '
             'The daily baseline has market entry, 30-minute horizon, ATR levels and fee/slippage '
             '5.5/2 bps per side, not live midpoint/60-minute execution. No repository code audit is performed.'}

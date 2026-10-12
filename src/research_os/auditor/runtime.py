@@ -21,7 +21,7 @@ from research_os.pipeline.storage import StorageBudget
 logger = logging.getLogger(__name__)
 MOSCOW = ZoneInfo('Europe/Moscow')
 INTERVAL = 14400
-MONITOR_INTERVAL = 1800
+MONITOR_INTERVAL = 300
 
 
 def windows(now):

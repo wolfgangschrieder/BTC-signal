@@ -3,7 +3,7 @@ from collections import deque
 from dataclasses import asdict
 from research_os.features.timeframes import OHLCVBar, MultiTimeframeFeatureEngine
 from collections.abc import Awaitable,Callable
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 import asyncio
 import logging
 import httpx
@@ -65,6 +65,7 @@ class LiveSignalService:
         self._last_liquidity_compute_monotonic=0.0
         self._liquidity_compute_interval_seconds=0.05
         self._last_candle_start=None
+        self._history_restore_pending = True
         self.orderbook=OrderBook(symbol,max_levels=50)
         self.rest=BybitRestClient()
         self._last_orderbook_update=datetime.min.replace(tzinfo=timezone.utc)
@@ -144,6 +145,30 @@ class LiveSignalService:
         self.derivatives_funding = self.derivatives_oi = None
         self.previous_derivatives_price = self.previous_funding = self.previous_oi = None
         self._last_candle_start = None
+        self._history_restore_pending = True
+
+    def _load_price_history(self, before, as_of):
+        from research_os.pipeline.history import load_history
+        with SessionLocal() as session:
+            return load_history(session,self.symbol,before,as_of,min(self.bars_1m.maxlen,10080))
+
+    async def _restore_price_history(self, before):
+        self._history_restore_pending = False
+        if self.publisher is None or self.interval!='1':
+            return
+        try:
+            bars = await asyncio.to_thread(self._load_price_history,before,datetime.now(timezone.utc))
+        except Exception as error:  # noqa: BLE001 - unavailable history means warmup, never fabricated bars
+            logger.warning('Price history restore failed (%s); warming up',type(error).__name__)
+            return
+        for history in (self.closes,self.highs,self.lows,self.bars_1m):
+            history.clear()
+        self.bars_1m.extend(bars)
+        self.closes.extend(bar.close for bar in bars)
+        self.highs.extend(bar.high for bar in bars)
+        self.lows.extend(bar.low for bar in bars)
+        self._last_candle_start = bars[-1].timestamp if bars else None
+        logger.info('Price history restored symbol=%s minute_bars=%s',self.symbol,len(bars))
 
     async def _handle(self,message):
         topic=message.get("topic","")
@@ -179,7 +204,15 @@ class LiveSignalService:
             if topic.startswith("kline."):
                 event=BybitNormalizer.kline(message); p=event.payload
                 if not p.get("confirm"): return
-                if self._last_candle_start==event.event_time: return
+                if self._last_candle_start is not None and event.event_time<=self._last_candle_start: return
+                if self._history_restore_pending:
+                    await self._restore_price_history(event.event_time)
+                if self._last_candle_start is not None and event.event_time!=self._last_candle_start+timedelta(minutes=1):
+                    for history in (self.closes,self.highs,self.lows,self.bars_1m):
+                        history.clear()
+                    self._previous_candle_flow_price = None
+                    self._previous_candle_cvd = self.cumulative_delta
+                    logger.warning('Candle gap detected; price features warming up')
                 self._last_candle_start=event.event_time
                 self.closes.append(float(p["close"])); self.highs.append(float(p["high"])); self.lows.append(float(p["low"]))
                 self.bars_1m.append(OHLCVBar(event.event_time,float(p["open"]),float(p["high"]),float(p["low"]),float(p["close"]),float(p["volume"])))
