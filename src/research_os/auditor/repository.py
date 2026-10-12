@@ -17,17 +17,25 @@ class AuditorRepository:
                            {'kind':kind,'start':start}).first():
             return None
         usage = session.execute(text('''SELECT count(*) AS n,coalesce(sum(tokens),0) AS tokens
-            FROM intelligence.auditor_runs WHERE created_at>=:start AND created_at<:end'''),
+            FROM intelligence.auditor_runs WHERE tokens>0 AND created_at>=:start AND created_at<:end'''),
             {'start':budget_start,'end':budget_end}).mappings().one()
         if usage['n']>=daily_requests or usage['tokens']+tokens>daily_budget:
             return None
+        for task in snapshot.get('tasks', []):
+            row = session.execute(text("SELECT status FROM intelligence.auditor_tasks WHERE task_id=CAST(:id AS uuid) FOR UPDATE"),
+                                  {'id':task['task_id']}).scalar_one_or_none()
+            if row != 'waiting':
+                return None
         identity = str(uuid4())
         session.execute(text('''INSERT INTO intelligence.auditor_runs
             (run_id,kind,period_start,period_end,status,model,tokens,snapshot,delivery_until)
             VALUES (:id,:kind,:start,:end,'started',:model,:tokens,CAST(:snapshot AS jsonb),:until)'''),
             {'id':identity,'kind':kind,'start':start,'end':end,'model':model,'tokens':tokens,
              'snapshot':json.dumps(snapshot,ensure_ascii=False),
-             'until':end+timedelta(hours=24) if kind=='daily' else end+timedelta(minutes=40)})
+             'until':end+timedelta(hours=24) if kind=='daily' else end+timedelta(hours=4)})
+        for task in snapshot.get('tasks', []):
+            session.execute(text("UPDATE intelligence.auditor_tasks SET status='running',run_id=CAST(:run AS uuid),updated_at=clock_timestamp() WHERE task_id=CAST(:id AS uuid)"),
+                            {'run':identity,'id':task['task_id']})
         return identity
 
     def previous(self, session, kind="tick"):
@@ -46,14 +54,18 @@ class AuditorRepository:
                  'evidence': {key: row['snapshot'].get('evidence', {}).get(key) for key in keys}}
                 for row in rows if row['report']]
 
-    def complete(self, session, identity, report, message, usage):
+    def complete(self, session, identity, report, message, usage, delivery_message=None):
+        from research_os.auditor.tasks import TaskRepository
+        TaskRepository().finish(session, identity, report.task_results)
         session.execute(text('''UPDATE intelligence.auditor_runs
-            SET status='completed',report=CAST(:report AS jsonb),message=:message,
+            SET status='completed',report=CAST(:report AS jsonb),message=:message,delivery_message=:delivery,
                 tokens=coalesce(CAST(:usage AS INTEGER),tokens)
             WHERE run_id=:id AND status='started' '''),
-            {'id':identity,'report':report.model_dump_json(),'message':message,'usage':usage})
+            {'id':identity,'report':report.model_dump_json(),'message':message,'usage':usage,'delivery':delivery_message})
 
     def fail(self, session, identity, error):
+        from research_os.auditor.tasks import TaskRepository
+        TaskRepository().fail(session, identity)
         session.execute(text("UPDATE intelligence.auditor_runs SET status='failed',error_type=:error WHERE run_id=:id AND status='started'"),
                         {'id':identity,'error':type(error).__name__[:96]})
 
@@ -67,7 +79,7 @@ class AuditorRepository:
           SET claim_token=:token,attempts=attempts+1,
               available_at=clock_timestamp()+interval '60 seconds'
           FROM candidate WHERE item.run_id=candidate.run_id
-          RETURNING item.run_id,item.message,item.message_part,item.claim_token,item.attempts'''),
+          RETURNING item.run_id,coalesce(item.delivery_message,item.message) AS message,item.message_part,item.claim_token,item.attempts'''),
           {'token':str(uuid4())}).mappings().first()
 
     def delivered(self, session, item, more=False):
@@ -92,5 +104,5 @@ class AuditorRepository:
         session.execute(text("SET LOCAL statement_timeout = '5s'"))
         session.execute(text('''DELETE FROM intelligence.auditor_runs WHERE run_id IN (
             SELECT run_id FROM intelligence.auditor_runs
-            WHERE (kind='tick' AND created_at<:ticks) OR (kind='daily' AND created_at<:daily)
+            WHERE (kind IN ('tick','alert') AND created_at<:ticks) OR (kind='daily' AND created_at<:daily)
             ORDER BY created_at LIMIT 500)'''), {'ticks':now-timedelta(days=days),'daily':now-timedelta(days=90)})

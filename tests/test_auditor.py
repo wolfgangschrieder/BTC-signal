@@ -24,7 +24,7 @@ NOW = datetime(2026, 10, 9, 21, 2, tzinfo=UTC)
 
 def report_data():
     return {'verdict':'insufficient_data','comment':'Недостаточно завершённых прогнозов.',
-            'comment_evidence_ids':['cohort.completed'],'findings':[]}
+            'comment_evidence_ids':['cohort.completed'],'findings':[], 'task_results':[]}
 
 
 def test_unknown_evidence_and_credentials_are_rejected():
@@ -50,9 +50,9 @@ def test_idle_comment_is_valid_and_telegram_is_bounded():
     assert not report.findings
 
 
-def test_periods_align_to_thirty_minutes_and_previous_moscow_day():
+def test_periods_align_to_four_hours_moscow_and_previous_day():
     tick, daily = windows(NOW)
-    assert tick == ('tick',datetime(2026,10,9,20,30,tzinfo=UTC),datetime(2026,10,9,21,tzinfo=UTC))
+    assert tick == ('tick',datetime(2026,10,9,17,tzinfo=UTC),datetime(2026,10,9,21,tzinfo=UTC))
     assert daily == ('daily',datetime(2026,10,8,21,tzinfo=UTC),datetime(2026,10,9,21,tzinfo=UTC))
 
 
