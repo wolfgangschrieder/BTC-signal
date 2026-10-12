@@ -103,5 +103,34 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  report-export:
+    profiles: [report-export]
+    image: btc-signal:local
+    command: ["research-os", "auditor-export"]
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.25
+    environment:
+      DATABASE_URL: postgresql+psycopg://research_os:${POSTGRES_PASSWORD}@postgres:5432/research_os
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/drive-account.json
+      DRIVE_EXPORT_FOLDER_ID: ${DRIVE_EXPORT_FOLDER_ID:-}
+      DRIVE_EXPORT_JSON_ID: ${DRIVE_EXPORT_JSON_ID:-}
+      DRIVE_EXPORT_TEXT_ID: ${DRIVE_EXPORT_TEXT_ID:-}
+    volumes:
+      - type: bind
+        source: ${DRIVE_EXPORT_KEY_PATH:-./secrets/drive-service-account.json}
+        target: /run/secrets/drive-account.json
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "2"
+
 volumes:
   postgres_data:
