@@ -31,11 +31,24 @@ cohort.completed=0 — нет завершённых прогнозов в да�
 
 
 def prepare_prompt(snapshot, previous):
-    payload = json.dumps({'evidence': snapshot['evidence'], 'limitations': snapshot['limitations'],
-                          'previous_comments': previous, 'tasks':snapshot.get('tasks',[]),
-                          'task_history':snapshot.get('task_history',[])}, ensure_ascii=False, separators=(',', ':'))
-    size = len((SYSTEM + payload).encode('utf-8'))
-    if size > 16000:
+    data = {'evidence':snapshot['evidence'],'limitations':snapshot['limitations'],
+            'previous_comments':previous,'tasks':snapshot.get('tasks',[]),
+            'task_history':snapshot.get('task_history',[])}
+    def encode():
+        payload = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+        return payload, len((SYSTEM+payload).encode('utf-8'))
+    payload, size = encode()
+    if size>16000:
+        # Preserve all current facts and assigned tasks; only historical prose is optional.
+        data['previous_comments'] = [{key:row[key] for key in ('kind','period_end','evidence') if key in row}
+                                     for row in previous]
+        data['context_truncated'] = 'Historical commentary omitted to fit input budget; current evidence/tasks unchanged'
+        payload, size = encode()
+    if size>16000:
+        data['task_history'] = []
+        data['context_truncated'] += '; prior task interpretations omitted'
+        payload, size = encode()
+    if size>16000:
         raise ValueError('Auditor input exceeds byte budget')
     # Conservative byte-based reservation plus message framing and maximum output.
     return payload, size

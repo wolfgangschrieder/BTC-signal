@@ -68,3 +68,17 @@ async def test_empty_cohort_can_accept_a_design_without_claiming_experiment_exec
     value, _ = await DeepSeekAnalyst('placeholder','deepseek-flash',transport=transport).analyze(payload,evidence)
     assert value.task_results[0].status=='completed'
     assert value.verdict=='insufficient_data'
+
+
+def test_budget_trims_only_historical_interpretations_not_current_facts_or_tasks():
+    evidence = project_evidence() | {'cohort.completed':0}
+    tasks = [{'task_id':str(uuid4()),'kind':'experiment','question':QUESTIONS['experiment'],'context':{}}]
+    previous = [{'comment':'я'*10000,'evidence':{'cohort.completed':0}}]
+    snapshot = {'evidence':evidence,'limitations':'','tasks':tasks,
+                'task_history':[{'conclusion':'я'*10000}]}
+    payload, size = prepare_prompt(snapshot,previous)
+    data = json.loads(payload)
+    assert size<=16000 and data['evidence']==evidence and data['tasks']==tasks
+    assert data['previous_comments'][0]['evidence']==previous[0]['evidence']
+    assert data['task_history']==[] and 'context_truncated' in data
+    assert snapshot['task_history'] and previous[0]['comment']
