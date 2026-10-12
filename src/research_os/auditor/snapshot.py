@@ -10,7 +10,7 @@ from research_os.research.threshold_check import study
 
 
 def collect_snapshot(session, end, kind, settings):
-    hours, limit = (24, 1440) if kind == 'daily' else (1, 120)
+    hours, limit = (24, 1440) if kind == 'daily' else ((1, 120) if kind == 'monitor' else (4, 240))
     report = build_report(session, now=end, hours=hours, limit=limit,
                           threshold=settings.signal_min_probability,
                           calibrated_models_configured=bool(settings.calibration_model_ids.strip()))
@@ -52,6 +52,14 @@ def collect_snapshot(session, end, kind, settings):
     evidence['signals.telegram_pending'] = int(delivery['pending'])
     evidence['signals.telegram_max_attempts'] = delivery['max_attempts']
     evidence['storage.database_bytes'] = session.execute(text('SELECT pg_database_size(current_database())')).scalar_one()
+    history = session.execute(text("""SELECT count(*) AS n,min(event_time) AS first,max(event_time) AS last
+        FROM market.candles WHERE symbol='BTCUSDT' AND interval='1'
+        AND event_time>=:lower AND event_time<=:end AND point_in_time_available_at<=:end"""),
+        {'lower':end-timedelta(minutes=settings.live_history_minutes),'end':end}).mappings().one()
+    evidence['history.minute_bars'] = int(history['n'])
+    evidence['history.first_minute_utc'] = history['first'].isoformat() if history['first'] else None
+    evidence['history.last_minute_utc'] = history['last'].isoformat() if history['last'] else None
+    evidence['history.limitations'] = 'Stored PIT-available minute rows; not proof of contiguous bars or application in-memory history'
     # The daily study uses this baseline's own fixed costs and market-entry assumptions.
     if kind == 'daily':
         rows = session.execute(text('''SELECT symbol,timestamp,decision_time,point_in_time_available_at,
@@ -71,7 +79,7 @@ def collect_snapshot(session, end, kind, settings):
             evidence[f'baseline.holdout.{threshold}.candidates'] = record.get('candidates',0)
             evidence[f'baseline.holdout.{threshold}.mean_net_return_pct'] = record.get('mean_net_return_pct')
     return {'evidence':evidence, 'limitations': report['limitations'] +
-            ' Sampling interval is 30 minutes; tick context is a rolling hour, capped at 120 states; daily context is 24 hours capped at 1440 states. '
+            ' Reports every four hours; tick context is four hours, capped at 240 states; monitoring is 30 minutes; daily context is 24 hours capped at 1440 states. '
             'Telegram backlog and database size are current reads, not backdated daily measurements. '
             'The daily baseline has market entry, 30-minute horizon, ATR levels and fee/slippage '
             '5.5/2 bps per side, not live midpoint/60-minute execution. No repository code audit is performed.'}

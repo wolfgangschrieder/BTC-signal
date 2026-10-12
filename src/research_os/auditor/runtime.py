@@ -9,9 +9,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 
 from research_os.auditor.client import DeepSeekAnalyst, prepare_prompt
-from research_os.auditor.models import message, message_parts
+from research_os.auditor.models import AnalystReport, message, message_parts, summary_message
 from research_os.auditor.repository import AuditorRepository
 from research_os.auditor.snapshot import collect_snapshot
+from research_os.auditor.tasks import TaskRepository, discover_tasks, operational_findings
 from research_os.core.config import get_settings
 from research_os.database.session import SessionLocal
 from research_os.notifications.telegram_client import TelegramClient
@@ -19,13 +20,15 @@ from research_os.pipeline.storage import StorageBudget
 
 logger = logging.getLogger(__name__)
 MOSCOW = ZoneInfo('Europe/Moscow')
-INTERVAL = 1800
+INTERVAL = 14400
+MONITOR_INTERVAL = 1800
 
 
 def windows(now):
-    end = datetime.fromtimestamp(int(now.timestamp()) // INTERVAL * INTERVAL, UTC)
+    local = now.astimezone(MOSCOW)
+    end = local.replace(hour=local.hour // 4 * 4, minute=0, second=0, microsecond=0).astimezone(UTC)
     day_end = end.astimezone(MOSCOW).replace(hour=0, minute=0, second=0, microsecond=0)
-    return [('tick', end-timedelta(seconds=INTERVAL), end),
+    return [('periodic', end-timedelta(seconds=INTERVAL), end),
             ('daily', (day_end-timedelta(days=1)).astimezone(UTC), day_end.astimezone(UTC))]
 
 
@@ -34,6 +37,7 @@ class AuditorService:
         self.settings = settings
         self.session_factory = session_factory
         self.repository = AuditorRepository()
+        self.tasks = TaskRepository()
         self.analyst = analyst or DeepSeekAnalyst(settings.deepseek_api_key.get_secret_value(), settings.auditor_model)
         self.telegram = telegram
         self.storage = storage
@@ -58,6 +62,11 @@ class AuditorService:
         with self.session_factory() as session:
             snapshot = collect_snapshot(session, end, kind, self.settings)
             previous = self.repository.previous(session, kind)
+            if kind == 'periodic':
+                snapshot['tasks'] = self.tasks.pending(session)
+                for task in snapshot['tasks']:
+                    for key, value in task['context'].items():
+                        snapshot['evidence'][f"task.{task['task_id']}.{key}"] = value
         return snapshot, previous
 
     async def audit(self, kind, start, end, now):
@@ -77,8 +86,10 @@ class AuditorService:
         try:
             report, usage = await asyncio.wait_for(
                 self.analyst.analyze(payload, snapshot['evidence'], self.settings.auditor_max_output_tokens), timeout=75)
+            report.validate_tasks(snapshot.get('tasks', []))
             text_message = message(report, kind, start, end, snapshot['evidence'])
-            await asyncio.to_thread(self._write, self.repository.complete, identity, report, text_message, usage)
+            await asyncio.to_thread(self._write, self.repository.complete, identity, report, text_message, usage,
+                                    summary_message(report,kind,start,end,identity))
             logger.info("Auditor report saved id=%s kind=%s parts=%s", identity, kind, len(message_parts(text_message)))
         except Exception as error:  # noqa: BLE001 - preserve spent reservation; never log provider body/key
             await asyncio.to_thread(self._write, self.repository.fail, identity, error)
@@ -111,12 +122,49 @@ class AuditorService:
             except TimeoutError:
                 pass
 
+    def _monitor(self, now):
+        # Current operational metrics must not be backdated to a report boundary.
+        if self.storage is not None:
+            self.storage.check()
+            self.storage.require_writable()
+        with self.session_factory() as session:
+            snapshot = collect_snapshot(session, now, 'monitor', self.settings)
+            session.commit()  # collect_snapshot uses a read-only transaction
+            session.execute(text("SET LOCAL statement_timeout = '5s'"))
+            session.execute(text('SELECT pg_advisory_xact_lock(8247132)'))
+            self.tasks.prune(session, now)
+            discover_tasks(session, snapshot['evidence'], now, self.tasks)
+            issues = operational_findings(snapshot['evidence'])
+            # One alert per issue per Moscow day; every check still updates task discovery.
+            fresh = []
+            for key, description in issues:
+                identity = self.tasks.enqueue(session, 'data_quality',
+                    'alert:'+now.astimezone(MOSCOW).date().isoformat()+':'+key,
+                    {'metric':key,'value':snapshot['evidence'][key]},1)
+                if identity:
+                    fresh.append((key,description))
+            if fresh:
+                report = AnalystReport(verdict='operational_issue',
+                    comment='\n'.join(description for _,description in fresh),
+                    comment_evidence_ids=[key for key,_ in fresh])
+                start = now-timedelta(seconds=MONITOR_INTERVAL)
+                identity = self.repository.reserve(session, kind='alert', start=start, end=now,
+                    snapshot=snapshot,model='local-monitor',tokens=0,budget_start=now,
+                    budget_end=now,daily_budget=self.settings.auditor_daily_token_budget)
+                if identity:
+                    body = message(report,'alert',start,now,snapshot['evidence'])
+                    body = body.replace('Интерпретация DeepSeek; выводы требуют проверки.',
+                                        'Автоматическая техническая проверка; API DeepSeek не вызывался.')
+                    self.repository.complete(session,identity,report,body,0)
+            session.commit()
+
     async def run(self, stop):
         delivery = asyncio.create_task(self.delivery_loop(stop))
         try:
             while not stop.is_set():
                 now = datetime.now(UTC)
                 try:
+                    await asyncio.to_thread(self._monitor, now)
                     await asyncio.to_thread(self._write, self.repository.prune, now, self.settings.auditor_retention_days)
                     for kind, start, end in windows(now):
                         if stop.is_set():
@@ -124,7 +172,7 @@ class AuditorService:
                         await self.audit(kind, start, end, now)
                 except Exception as error:  # noqa: BLE001 - analyst must not stop the market app
                     logger.warning('Auditor cycle failed (%s)', type(error).__name__)
-                remaining = INTERVAL - datetime.now(UTC).timestamp() % INTERVAL
+                remaining = MONITOR_INTERVAL - datetime.now(UTC).timestamp() % MONITOR_INTERVAL
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=remaining)
                 except TimeoutError:
