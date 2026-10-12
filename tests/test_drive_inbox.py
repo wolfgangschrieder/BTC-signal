@@ -129,14 +129,18 @@ def test_database_acceptance_survives_replay_and_transaction_rollback():
                 assert duplicate['task_id']==initial['task_id']
                 assert session.execute(text('SELECT count(*) FROM intelligence.auditor_tasks WHERE dedup_key=:key'),{'key':key}).scalar_one()==1
                 session.rollback()
+                session.execute(text('SET TRANSACTION READ ONLY'))
+                from research_os.auditor.tasks import TaskRepository
+                TaskRepository().pending(session)
+                session.rollback()
                 changed = inbox.model_copy(deep=True)
                 changed.tasks[0].objective='Different objective to demonstrate conflict.'
                 assert accept_requests(session,changed,NOW)[0]['reason']=='id_conflict'
                 session.rollback()
-                from research_os.auditor.tasks import TaskRepository
                 session.execute(text("UPDATE intelligence.auditor_tasks SET context=jsonb_set(context,'{request,expires_at_utc}',to_jsonb(CAST(:expiry AS text))) WHERE dedup_key=:key"),
                                 {'key':key,'expiry':(NOW-timedelta(hours=1)).isoformat()})
                 TaskRepository().pending(session)
+                TaskRepository().prune(session,NOW)
                 assert session.execute(text('SELECT status FROM intelligence.auditor_tasks WHERE dedup_key=:key'),{'key':key}).scalar_one()=='failed'
                 session.rollback()
     finally:
