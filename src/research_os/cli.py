@@ -199,6 +199,8 @@ def main():
     parser=argparse.ArgumentParser(prog="research-os")
     sub=parser.add_subparsers(dest="command",required=True)
     sub.add_parser("health"); sub.add_parser("live"); sub.add_parser("auditor")
+    export=sub.add_parser("auditor-export")
+    export.add_argument("--once", action="store_true")
     ar=sub.add_parser("auditor-report")
     ar.add_argument("--id", help="UUID отчёта; по умолчанию последний завершённый")
     tasks=sub.add_parser("auditor-tasks")
@@ -225,6 +227,9 @@ def main():
     if args.command=="observation-report": raise SystemExit(observation_report(args.symbol,args.hours,args.limit))
     if args.command=="health": raise SystemExit(health())
     if args.command=="state": raise SystemExit(state(args.symbol,args.history,args.timestamp,args.compare))
+    if args.command=="auditor-export":
+        from research_os.auditor.drive_export import main as export_main
+        raise SystemExit(export_main(args.once))
     if args.command=="auditor-tasks":
         from research_os.auditor.tasks import list_tasks
         raise SystemExit(list_tasks(args.enqueue))

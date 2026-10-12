@@ -25,3 +25,14 @@ SQLAlchemy==2.1.4
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 websockets==15.0.1
+
+# Private report exporter authentication
+google-auth==2.62.0
+requests==2.34.2
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
+charset-normalizer==3.5.1
+urllib3==2.8.0
+cryptography==50.0.1
+cffi==2.1.1
+pycparser==3.0
