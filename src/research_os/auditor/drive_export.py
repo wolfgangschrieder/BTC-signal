@@ -56,6 +56,8 @@ def encode_bundle(bundle):
     text_body = ('BTC-signal · экспорт UTC: '+bundle['exported_at_utc']+'\n'+
                  '\n\n'.join('ID: '+item['run_id']+'\n'+item['full_text'] for item in bundle['reports'])+
                  '\n\nЗАДАЧИ\n'+json.dumps(bundle['tasks'],ensure_ascii=False,default=str,indent=2)).encode()
+    if 'research_inbox' in bundle:
+        text_body += ('\n\nПОДТВЕРЖДЕНИЯ DRIVE\n'+json.dumps(bundle['research_inbox'],ensure_ascii=False,default=str,indent=2)).encode()
     if len(text_body)>MAX_BYTES:
         raise ValueError('Text export exceeds byte budget')
     stable = {key:value for key,value in bundle.items() if key!='exported_at_utc'}
@@ -83,6 +85,36 @@ class DriveExporter:
             raise ValueError('Drive targets must be distinct')
         self.transport = transport
         self.digest = None
+
+    async def read_inbox(self, inbox_id):
+        from research_os.auditor.drive_inbox import MAX_INBOX_BYTES, parse_inbox
+        identity = identifier(inbox_id)
+        if identity in {self.folder,*(item[0] for item in self.targets)}:
+            raise ValueError('Inbox must be a separate file')
+        token = await asyncio.to_thread(self.token)
+        async with httpx.AsyncClient(timeout=20,transport=self.transport,follow_redirects=False) as client:
+            headers = {'Authorization':'Bearer '+token}
+            for target,mime in ((self.folder,'application/vnd.google-apps.folder'),(identity,'application/json')):
+                response = await client.get('https://www.googleapis.com/drive/v3/files/'+target,
+                    params={'fields':'mimeType,parents,trashed,permissions(type,role)','supportsAllDrives':'true'},headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                permissions = data.get('permissions',[])
+                if not permissions or any(item.get('type')!='user' for item in permissions):
+                    raise ValueError('Private user-only inbox required')
+                if data.get('trashed') or data.get('mimeType')!=mime:
+                    raise ValueError('Unexpected inbox target')
+                if target==identity and data.get('parents')!=[self.folder]:
+                    raise ValueError('Inbox outside configured folder')
+            async with client.stream('GET','https://www.googleapis.com/drive/v3/files/'+identity,
+                                     params={'alt':'media','supportsAllDrives':'true'},headers=headers) as response:
+                response.raise_for_status()
+                body = bytearray()
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    body.extend(chunk)
+                    if len(body)>MAX_INBOX_BYTES:
+                        raise ValueError('Inbox byte budget exceeded')
+            return parse_inbox(bytes(body))
 
     def token(self):
         if not self.credentials.valid:
@@ -136,8 +168,20 @@ async def run(once=False):
     for name in (signal.SIGTERM,signal.SIGINT):
         loop.add_signal_handler(name,stop.set)
     while not stop.is_set():
+        inbox_receipts = None
+        inbox_id = os.environ.get('DRIVE_RESEARCH_INBOX_ID','').strip()
+        if inbox_id:
+            try:
+                from research_os.auditor.drive_inbox import import_requests
+                inbox = await asyncio.wait_for(exporter.read_inbox(inbox_id),timeout=75)
+                inbox_receipts = await asyncio.to_thread(import_requests,inbox)
+            except Exception as error:  # noqa: BLE001 - no untrusted body or credential-bearing messages
+                logger.warning('Drive inbox failed (%s)',type(error).__name__)
+                inbox_receipts = {'status':'unavailable','error_type':type(error).__name__}
         try:
             bundle = await asyncio.to_thread(read_bundle)
+            if inbox_receipts is not None:
+                bundle['research_inbox'] = inbox_receipts
             if await asyncio.wait_for(exporter.publish(bundle),timeout=150):
                 logger.info('Private Drive export completed reports=%s',len(bundle['reports']))
         except Exception as error:  # noqa: BLE001 - never emit provider body or token-bearing exceptions
@@ -145,7 +189,7 @@ async def run(once=False):
             if once:
                 return 1
         if once:
-            return 0
+            return 1 if isinstance(inbox_receipts,dict) and inbox_receipts.get('status')=='unavailable' else 0
         try:
             await asyncio.wait_for(stop.wait(),timeout=60)
         except TimeoutError:

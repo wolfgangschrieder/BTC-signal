@@ -27,6 +27,11 @@ class TaskRepository:
              'context':json.dumps(context,ensure_ascii=False)}).scalar_one_or_none()
 
     def pending(self, session):
+        session.execute(text("""UPDATE intelligence.auditor_tasks
+            SET status='failed',updated_at=clock_timestamp(),
+                result='{"reason":"request_expired_before_assignment"}'::jsonb
+            WHERE status='waiting' AND context->>'source'='drive'
+                AND (context->'request'->>'expires_at_utc')::timestamptz<=clock_timestamp()"""))
         rows = session.execute(text("""SELECT task_id,kind,context FROM intelligence.auditor_tasks
             WHERE status='waiting' ORDER BY priority,created_at LIMIT 3""")).mappings().all()
         return [{'task_id':str(row['task_id']), 'kind':row['kind'],
