@@ -99,6 +99,15 @@ def compose(override=None):
     return command+['--profile','auditor','--profile','report-export']
 
 
+def build_image(tag, override):
+    """Build through Compose so servers without the legacy docker buildx plugin work."""
+    write_json(override,{'services':{'migrate':{
+        'image':tag,
+        'build':{'labels':{'org.btc-signal.auto-managed':'true'}},
+    }}})
+    run(compose(override)+['build','migrate'],timeout=600)
+
+
 def policy(text_body, changed):
     data = json.loads(text_body)
     if data!={'schema_version':1,'enabled':True,'migration_policy':'none'}:
@@ -213,8 +222,7 @@ def update():
         switched = True
         tag = 'btc-signal:auto-'+candidate
         report('deploying','build')
-        run(['docker','build','--label','org.btc-signal.auto-managed=true',
-             '-t',tag,'-f','Dockerfile','.'],timeout=600)
+        build_image(tag,STATUS/'build-compose.json')
         if shutil.disk_usage(REPO).free<5_000_000_000:
             raise UpdateError('insufficient_runtime_space')
         override = STATUS/'runtime-compose.json'

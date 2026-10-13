@@ -36,6 +36,21 @@ def test_migrations_require_operator_and_manifest_cannot_enable_shell():
         module.policy(json.dumps({'schema_version':1,'enabled':True,'migration_policy':'auto'}),[])
 
 
+def test_candidate_build_uses_compose_buildkit_with_managed_image_label(tmp_path,monkeypatch):
+    module = updater()
+    monkeypatch.setattr(module,'REPO',tmp_path)
+    calls = []
+    monkeypatch.setattr(module,'run',lambda args,**kwargs:calls.append(args) or '')
+    tag = 'btc-signal:auto-'+'a'*40
+    module.build_image(tag,tmp_path/'build-compose.json')
+    assert calls[0][-2:] == ['build','migrate']
+    assert calls[0][0:2] == ['docker','compose']
+    assert json.loads((tmp_path/'build-compose.json').read_text()) == {
+        'services': {'migrate': {'image':tag,
+            'build': {'labels': {'org.btc-signal.auto-managed':'true'}}}}
+    }
+
+
 def prepare(module, tmp_path, monkeypatch, healthy=True, migration=False):
     old,new = 'a'*40,'b'*40
     monkeypatch.setattr(module,'REPO',tmp_path)
@@ -69,6 +84,8 @@ def test_success_only_recreates_selected_services_without_postgres_or_migrations
     assert status['status']=='deployed'
     assert json.loads((module.STATUS/'last-success.json').read_text())['revision']==new
     assert any('--no-deps' in args and args[-1]=='app' for args in calls)
+    assert any(args[-2:]==['build','migrate'] for args in calls)
+    assert not any(args[:2]==['docker','build'] for args in calls)
     assert not any('postgres' in args or 'alembic' in args for args in calls)
 
 
@@ -91,7 +108,7 @@ def test_migration_does_not_change_checkout_or_images(tmp_path,monkeypatch):
     module = updater()
     calls,_,_ = prepare(module,tmp_path,monkeypatch,migration=True)
     assert module.update()==1
-    assert not any(args[:2]==['git','merge'] or args[:2]==['docker','build'] for args in calls)
+    assert not any(args[:2]==['git','merge'] or args[-2:]==['build','migrate'] for args in calls)
     assert json.loads((module.STATUS/'status.json').read_text())['reason']=='migration_requires_operator'
 
 
