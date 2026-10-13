@@ -80,6 +80,40 @@ async def test_api_returns_validated_json_without_tools():
 
 
 @pytest.mark.asyncio
+async def test_api_retries_one_connection_timeout_only():
+    attempts = 0
+
+    def handler(_):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectTimeout('connect timed out')
+        return httpx.Response(200,json={'choices':[{
+            'finish_reason':'stop','message':{'content':json.dumps(report_data())}}],
+            'usage':{'total_tokens':100}})
+
+    client = DeepSeekAnalyst('placeholder-key','deepseek-flash',transport=httpx.MockTransport(handler))
+    report, tokens = await client.analyze('{}',{'cohort.completed':0})
+    assert report.verdict == 'insufficient_data' and tokens == 100
+    assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_api_does_not_retry_read_timeout():
+    attempts = 0
+
+    def handler(_):
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ReadTimeout('read timed out')
+
+    client = DeepSeekAnalyst('placeholder-key','deepseek-flash',transport=httpx.MockTransport(handler))
+    with pytest.raises(httpx.ReadTimeout):
+        await client.analyze('{}',{'cohort.completed':0})
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('content,reason', [('', 'stop'),('{}','length'),('not json','stop')])
 async def test_empty_truncated_or_invalid_api_output_fails(content, reason):
     transport = httpx.MockTransport(lambda _:httpx.Response(200,json={'choices':[{
