@@ -26,6 +26,7 @@ def identifier(value):
 
 
 def build_bundle(session, now):
+    from research_os.auditor.operations import operational_status
     session.execute(text('SET TRANSACTION READ ONLY'))
     session.execute(text("SET LOCAL statement_timeout = '5s'"))
     rows = session.execute(text("""SELECT DISTINCT ON (kind) run_id,kind,period_start,period_end,report,snapshot
@@ -44,6 +45,7 @@ def build_bundle(session, now):
     return {'schema_version':1,'status':'ready' if reports else 'no_completed_reports',
             'exported_at_utc':now.isoformat(),'reports':reports,
             'tasks':[dict(row) for row in tasks],
+            'operations':operational_status(session,now),
             'limitations':'Saved analyst interpretations, not verified profitability. Task statuses are current reads. No market raw events, configuration secrets or account data are exported.'}
 
 
@@ -58,9 +60,16 @@ def encode_bundle(bundle):
                  '\n\nЗАДАЧИ\n'+json.dumps(bundle['tasks'],ensure_ascii=False,default=str,indent=2)).encode()
     if 'research_inbox' in bundle:
         text_body += ('\n\nПОДТВЕРЖДЕНИЯ DRIVE\n'+json.dumps(bundle['research_inbox'],ensure_ascii=False,default=str,indent=2)).encode()
+    if 'operations' in bundle:
+        text_body += ('\n\nСОСТОЯНИЕ СИСТЕМЫ\n'+json.dumps(bundle['operations'],ensure_ascii=False,default=str,indent=2)).encode()
     if len(text_body)>MAX_BYTES:
         raise ValueError('Text export exceeds byte budget')
     stable = {key:value for key,value in bundle.items() if key!='exported_at_utc'}
+    if 'operations' in stable:
+        stable['operations'] = dict(stable['operations'])
+        # Keep a five-minute heartbeat even if every observed fact is unchanged.
+        observed = datetime.fromisoformat(stable['operations']['observed_at_utc'])
+        stable['operations']['observed_at_utc'] = int(observed.timestamp())//300
     digest = hashlib.sha256(json.dumps(stable,ensure_ascii=False,default=str,sort_keys=True).encode()).hexdigest()
     return payload,text_body,digest
 

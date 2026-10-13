@@ -100,10 +100,11 @@ def test_setup_keeps_other_configuration_and_does_not_print_or_embed_key(tmp_pat
     assert env.stat().st_mode & 0o777 == 0o600
 
 
-def test_bundle_reads_only_journal_and_tasks_and_keeps_real_report_period():
+def test_bundle_reads_only_journal_and_tasks_and_keeps_real_report_period(monkeypatch):
     from unittest.mock import MagicMock
 
     from research_os.auditor.drive_export import build_bundle
+    monkeypatch.setattr('research_os.auditor.operations.operational_status',lambda session,now:{'observed_at_utc':now.isoformat()})
     now = datetime.now(UTC)
     session = MagicMock()
     report = {'verdict':'insufficient_data','comment':'Нет завершённых исходов.',
