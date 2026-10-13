@@ -171,6 +171,8 @@ def update():
                        for key,value in restored.items())):
                 return 1
             if (run(['git','status','--porcelain','--untracked-files=no'])
+                or run(['git','branch','--show-current'])!='main'
+                or run(['git','remote','get-url','origin']) not in (ORIGIN,ORIGIN.removesuffix('.git'))
                 or run(['git','rev-parse','HEAD']) not in (old,target)):
                 return 1  # do not overwrite an operator's concurrent changes
             status.update(previous_revision=old,candidate_revision=target,previous_images=restored)
