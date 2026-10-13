@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """One-time local installation; no credentials or env contents are printed."""
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -17,6 +18,37 @@ def main():
         raise RuntimeError('Unsafe status directory')
     directory.mkdir(mode=0o755,exist_ok=True)
     os.chmod(directory,0o755)
+    spec = importlib.util.spec_from_file_location('btc_updater',ROOT/'deploy/auto-update.py')
+    updater = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(updater)
+    revision = updater.run(['git','rev-parse','HEAD'])
+    if updater.run(['git','branch','--show-current'])!='main' or updater.run(['git','status','--porcelain','--untracked-files=no']):
+        print('Установка остановлена: нужна чистая main.')
+        return 1
+    if not updater.check_ci(revision):
+        print('Установка остановлена: дождитесь успешного main CI и повторите установщик.')
+        return 1
+    updater.policy((ROOT/'deploy/auto-release.json').read_text(),[])
+    if 'report-export' in updater.services():
+        # Bootstrap the stable status reader before enabling updates, so first rollback is visible.
+        if shutil.disk_usage(ROOT).free<8_000_000_000:
+            print('Установка остановлена: для сборки нужно 8 ГБ свободного места.')
+            return 1
+        prior = updater.previous_images(['report-export'])
+        tag = 'btc-signal:auto-'+revision
+        updater.run(['docker','build','--label','org.btc-signal.auto-managed=true','-t',tag,
+                     '-f','Dockerfile','.'],timeout=600)
+        if shutil.disk_usage(ROOT).free<5_000_000_000:
+            print('Установка остановлена: после сборки осталось меньше5 ГБ.')
+            return 1
+        override = directory/'bootstrap-compose.json'
+        updater.write_json(override,{'services':{'report-export':{'image':tag}}})
+        try:
+            updater.run(updater.compose(override)+['up','-d','--no-deps','--force-recreate','report-export'],timeout=150)
+        except Exception:  # noqa: BLE001 - retain the old exporter on bootstrap command failure
+            updater.write_json(override,{'services':{'report-export':{'image':prior['report-export']}}})
+            updater.run(updater.compose(override)+['up','-d','--no-deps','--force-recreate','report-export'],timeout=150)
+            return 1
     target = Path('/usr/local/lib/btc-signal-auto-update.py')
     if target.is_symlink():
         raise RuntimeError('Unsafe updater destination')
