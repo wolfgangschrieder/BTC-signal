@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -67,22 +68,33 @@ class DeepSeekAnalyst:
         self.key, self.model, self.transport = key, model, transport
 
     async def analyze(self, payload, evidence, max_output_tokens=1200):
-        async with httpx.AsyncClient(timeout=60, transport=self.transport) as client:  # noqa: SIM117 - stream lifetime belongs to client
-            async with client.stream('POST', 'https://api.deepseek.com/chat/completions',
-                                     headers={'Authorization': f'Bearer {self.key}'}, json={
-                                         'model': self.model,
-                                         'messages': [{'role':'system','content':SYSTEM},
-                                                      {'role':'user','content':payload}],
-                                         'response_format': {'type':'json_object'},
-                                         'thinking': {'type':'disabled'},
-                                         'max_tokens': max_output_tokens,
-                                     }) as response:
-                response.raise_for_status()
-                body = bytearray()
-                async for chunk in response.aiter_bytes(chunk_size=16384):
-                    body.extend(chunk)
-                    if len(body) > 128000:
-                        raise ValueError('Auditor response exceeds byte budget')
+        timeout = httpx.Timeout(60, connect=12, write=20, pool=10)
+        request = {
+            'model': self.model,
+            'messages': [{'role':'system','content':SYSTEM},
+                         {'role':'user','content':payload}],
+            'response_format': {'type':'json_object'},
+            'thinking': {'type':'disabled'},
+            'max_tokens': max_output_tokens,
+        }
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
+                    async with client.stream('POST', 'https://api.deepseek.com/chat/completions',
+                            headers={'Authorization': f'Bearer {self.key}'}, json=request) as response:
+                        response.raise_for_status()
+                        body = bytearray()
+                        async for chunk in response.aiter_bytes(chunk_size=16384):
+                            body.extend(chunk)
+                            if len(body) > 128000:
+                                raise ValueError('Auditor response exceeds byte budget')
+                break
+            except httpx.ConnectTimeout:
+                # A connect timeout occurs before an HTTP request can reach the API.
+                # Retry this case once; never retry read/write timeouts with uncertain billing.
+                if attempt:
+                    raise
+                await asyncio.sleep(1)
         result = json.loads(body)
         choice = result['choices'][0]
         if choice.get('finish_reason') != 'stop':
