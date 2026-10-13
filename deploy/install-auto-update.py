@@ -36,8 +36,7 @@ def main():
             return 1
         prior = updater.previous_images(['report-export'])
         tag = 'btc-signal:auto-'+revision
-        updater.run(['docker','build','--label','org.btc-signal.auto-managed=true','-t',tag,
-                     '-f','Dockerfile','.'],timeout=600)
+        updater.build_image(tag,directory/'bootstrap-build-compose.json')
         if shutil.disk_usage(ROOT).free<5_000_000_000:
             print('Установка остановлена: после сборки осталось меньше5 ГБ.')
             return 1
