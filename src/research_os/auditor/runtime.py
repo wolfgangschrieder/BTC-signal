@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 
 from research_os.auditor.client import DeepSeekAnalyst, prepare_prompt
+from research_os.auditor.diagnostics import failure_diagnostic
 from research_os.auditor.models import AnalystReport, message, message_parts, summary_message
 from research_os.auditor.repository import AuditorRepository
 from research_os.auditor.snapshot import collect_snapshot
@@ -94,7 +95,7 @@ class AuditorService:
             logger.info("Auditor report saved id=%s kind=%s parts=%s", identity, kind, len(message_parts(text_message)))
         except Exception as error:  # noqa: BLE001 - preserve spent reservation; never log provider body/key
             await asyncio.to_thread(self._write, self.repository.fail, identity, error)
-            logger.warning('Auditor analysis failed (%s)', type(error).__name__)
+            logger.warning('Auditor analysis failed (%s)', failure_diagnostic(error))
 
     async def deliver_once(self):
         if self.telegram is None:

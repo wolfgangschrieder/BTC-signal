@@ -5,6 +5,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy import text
+from research_os.auditor.diagnostics import failure_diagnostic
 
 
 class AuditorRepository:
@@ -67,7 +68,7 @@ class AuditorRepository:
         from research_os.auditor.tasks import TaskRepository
         TaskRepository().fail(session, identity)
         session.execute(text("UPDATE intelligence.auditor_runs SET status='failed',error_type=:error WHERE run_id=:id AND status='started'"),
-                        {'id':identity,'error':type(error).__name__[:96]})
+                        {'id':identity,'error':failure_diagnostic(error)})
 
     def claim(self, session):
         return session.execute(text('''WITH candidate AS (
