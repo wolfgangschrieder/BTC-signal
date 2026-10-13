@@ -24,6 +24,7 @@ def safe_error(value):
 
 
 def operational_status(session, now):
+    from research_os.auditor.deployment_status import read_deployment_status
     attempts = session.execute(text("""SELECT run_id,kind,period_start,period_end,status,
         error_type,created_at FROM intelligence.auditor_runs
         WHERE kind IN ('periodic','daily') ORDER BY created_at DESC LIMIT 12""")).mappings().all()
@@ -36,6 +37,7 @@ def operational_status(session, now):
     return {'observed_at_utc':now.isoformat(),'latest_decision_utc':decision.isoformat() if decision else None,
             'latest_stored_minute_open_utc':candle.isoformat() if candle else None,
             'database_bytes':int(database),
+            'deployment':read_deployment_status(),
             'analyst_attempts':[{**dict(row),'run_id':str(row['run_id']),
                 'error_type':safe_error(row['error_type'])} for row in attempts],
             'limitations':'Database observations, not container health or actual fills. Candle is latest stored opening time, not proof of confirmation or contiguous history. Export freshness does not imply a new successful analyst report. Versions/disk reserve and complete server outage are not measured here.'}
