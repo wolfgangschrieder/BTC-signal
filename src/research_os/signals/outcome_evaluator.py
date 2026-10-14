@@ -14,9 +14,11 @@ class SignalOutcomeEvaluator:
     """Resolves live signals against future 1m OHLC candles.
 
     signal_time is the decision time, never the source candle open time.
-    Only candles opening strictly after that decision can fill an entry;
-    new conservative policies flag an entry candle touching TP/SL as ambiguous.
-    Historical signals retain their persisted execution policy and costs.
+    Legacy policies use only candles opening strictly after that decision.
+    Conservative midpoint policies also inspect the containing minute; if its
+    OHLC touches entry and TP/SL, the outcome is ambiguous because the intrabar
+    order and pre-decision movement cannot be reconstructed. Historical signals
+    retain their persisted execution policy and costs.
 
     Entry is modeled as a limit at the persisted entry-zone midpoint.
     It is not a market-order or arbitrary-zone-fill simulation.
@@ -28,10 +30,18 @@ class SignalOutcomeEvaluator:
         now=now or datetime.now(UTC); repo=SignalOutcomeRepository(); resolved=0
         for s in repo.pending(session,now):
             horizon=s["horizon_minutes"] or self.horizon_minutes
+            decision_minute = s["signal_time"].replace(second=0, microsecond=0)
+            include_decision_minute = (
+                s.get("execution_policy") == "conservative-midpoint-v2"
+                and s["signal_time"] > decision_minute
+            )
             candles=session.execute(text("""SELECT event_time,open,high,low,close FROM market.candles
-                WHERE symbol=:symbol AND interval='1' AND event_time>:time AND event_time<=:until
-                AND point_in_time_available_at<=:now ORDER BY event_time"""),
-                {"symbol":s["symbol"],"time":s["signal_time"],"until":s["signal_time"]+timedelta(minutes=horizon),"now":now}).mappings().all()
+                WHERE symbol=:symbol AND interval='1'
+                AND (event_time>:time OR (:include_decision_minute AND event_time=:decision_minute))
+                AND event_time<=:until AND point_in_time_available_at<=:now ORDER BY event_time"""),
+                {"symbol":s["symbol"],"time":s["signal_time"],"decision_minute":decision_minute,
+                 "include_decision_minute":include_decision_minute,
+                 "until":s["signal_time"]+timedelta(minutes=horizon),"now":now}).mappings().all()
             entry=None; best_mfe=0.0; worst_mae=0.0
             for c in candles:
                 high=float(c["high"]); low=float(c["low"])

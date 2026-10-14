@@ -123,7 +123,13 @@ class ReplayEngine:
         filled=False
         entry=None
         for candle in rows:
-            if candle.event_time <= decision_time: continue
+            if candle.event_time <= decision_time:
+                overlaps_decision_minute = (
+                    self.conservative_entry
+                    and candle.event_time < decision_time < candle.event_time + timedelta(minutes=1)
+                )
+                if not overlaps_decision_minute:
+                    continue
             if candle.event_time > end: break
             if not filled:
                 fill=evaluate_candle(
