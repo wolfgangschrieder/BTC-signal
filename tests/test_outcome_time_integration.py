@@ -111,6 +111,34 @@ def test_delayed_decision_excludes_existing_candles_and_matches_replay(db, direc
     assert score == (1 if expected == "win" else None)
 
 
+
+def test_conservative_policy_marks_decision_minute_entry_and_target_ambiguous(db):
+    from types import SimpleNamespace
+
+    t = datetime(2026, 1, 1, tzinfo=UTC)
+    decision = t + timedelta(minutes=1, milliseconds=100)
+    outcome = pending(db, decision, "short", execution_policy="conservative-midpoint-v2")
+    same_minute = store_candle(db, t + timedelta(minutes=1), 100.5, 98.5)
+    next_minute = store_candle(db, t + timedelta(minutes=2), 99.5, 98.0)
+
+    assert SignalOutcomeEvaluator().resolve_pending(db, t + timedelta(minutes=4)) == 1
+    assert status(db) == "ambiguous"
+
+    signal = SimpleNamespace(
+        direction=SignalDirection.SHORT,
+        levels=SimpleNamespace(
+            entry_min=100,
+            entry_max=100,
+            stop_loss=outcome.stop_loss,
+            tp1=outcome.tp1,
+        ),
+    )
+    replay_status, score, _ = ReplayEngine(horizon_minutes=10, conservative_entry=True)._future_outcome(
+        signal, [same_minute, next_minute], decision
+    )
+    assert replay_status == status(db)
+    assert score is None
+
 def test_outcome_waits_for_delayed_candle_availability(db):
     t = datetime(2026, 1, 1, tzinfo=UTC)
     pending(db, t)
