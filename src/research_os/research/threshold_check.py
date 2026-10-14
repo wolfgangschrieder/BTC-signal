@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from bisect import bisect_left
 from collections import Counter
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 
@@ -11,7 +12,7 @@ from sqlalchemy import text
 
 from research_os.database.session import SessionLocal
 from research_os.intelligence.analyzer import MarketAnalyzer
-from research_os.intelligence.models import EvidenceDirection
+from research_os.intelligence.models import AnalysisResult, EvidenceDirection
 from research_os.intelligence.probability import ProbabilityEngine
 from research_os.market.state_vector import MarketStateVector
 from research_os.signals.execution import ExecutionStatus, evaluate_candle
@@ -77,6 +78,50 @@ def net_target_return(direction, price, atr, fee_bps=5.5, slippage_bps=2.0):
     return ((exit_price-entry)/entry if long else (entry-exit_price)/entry) - 2*fee_bps/10000
 
 
+def dominant_direction_counterfactual(analysis: AnalysisResult) -> AnalysisResult:
+    """Resolve a conflict to the larger evidence sum, but keep exact ties abstaining.
+
+    Research-only counterfactual. It does not change live analysis or signal policy.
+    """
+    if analysis.direction is not EvidenceDirection.CONFLICTING:
+        return analysis
+    if analysis.bullish_score == analysis.bearish_score:
+        return analysis
+    direction = (
+        EvidenceDirection.BULLISH
+        if analysis.bullish_score > analysis.bearish_score
+        else EvidenceDirection.BEARISH
+    )
+    return replace(
+        analysis,
+        direction=direction,
+        reason="counterfactual dominant evidence; conflict resolved for research",
+    )
+
+
+def _threshold_reports(data):
+    reports = {}
+    for threshold in (.4, .5, .6, .7):
+        selected = [(status, net, target_net) for score, status, net, target_net in data
+                    if score >= threshold]
+        known = [net for _, net, _ in selected if net is not None]
+        winners = [net for status, net, _ in selected if status == "win" and net is not None]
+        reports[str(threshold)] = {
+            'candidates': len(selected),
+            'statuses': dict(Counter(status for status, _, _ in selected)),
+            'net_positive': sum(net > 0 for net in known),
+            'tp_wins_with_nonpositive_net_return': sum(net <= 0 for net in winners),
+            'mean_net_return_of_tp_wins_pct': 100*sum(winners)/len(winners) if winners else None,
+            'candidates_with_nonpositive_net_tp_target': sum(
+                target_net is not None and target_net <= 0
+                for _, _, target_net in selected
+            ),
+            'mean_net_return_pct': 100*sum(known)/len(known) if known else None,
+            'resolved_with_known_return': len(known),
+        }
+    return reports
+
+
 def study(rows, candles, horizon=30):
     if horizon < 1:
         raise ValueError("horizon must be positive")
@@ -87,8 +132,12 @@ def study(rows, candles, horizon=30):
     candle_times = [bar['event_time'] for bar in candles]
     split = rows[0]['decision_time'] + (rows[-1]['decision_time']-rows[0]['decision_time'])/2
     end = max(bar['point_in_time_available_at'] for bar in candles)
-    samples = {'train': [], 'holdout': []}
+    samples = {
+        'current_abstain_on_conflict': {'train': [], 'holdout': []},
+        'dominant_direction_counterfactual': {'train': [], 'holdout': []},
+    }
     excluded = Counter()
+    counterfactual_excluded = Counter()
     analyzer, model = MarketAnalyzer(), ProbabilityEngine()
     for row in rows:
         decision = row['decision_time']
@@ -100,56 +149,83 @@ def study(rows, candles, horizon=30):
                                        row['point_in_time_available_at'], vector['values'],
                                        vector['availability'], row['data_quality'])
         analysis = analyzer.analyze(state)
-        prediction = model.predict(analysis)
-        if analysis.direction not in (EvidenceDirection.BULLISH, EvidenceDirection.BEARISH):
+        counterfactual = dominant_direction_counterfactual(analysis)
+        current_directional = analysis.direction in (
+            EvidenceDirection.BULLISH, EvidenceDirection.BEARISH
+        )
+        counterfactual_directional = counterfactual.direction in (
+            EvidenceDirection.BULLISH, EvidenceDirection.BEARISH
+        )
+        if not current_directional:
             excluded['no_direction_or_conflict'] += 1
+        if not counterfactual_directional:
+            counterfactual_excluded['no_direction_or_conflict'] += 1
+        if not current_directional and not counterfactual_directional:
             continue
         atr = state.values.get('atr_14')
         if not state.availability.get('atr_14') or atr is None or atr <= 0:
-            excluded['missing_atr'] += 1
+            if current_directional:
+                excluded['missing_atr'] += 1
+            if counterfactual_directional:
+                counterfactual_excluded['missing_atr'] += 1
             continue
         offset = bisect_left(candle_times, decision)
         future = candles[offset:offset+horizon]
         segment = 'train' if decision < split else 'holdout'
         boundary = split if segment == 'train' else end
         if len(future) != horizon or future[-1]['point_in_time_available_at'] > boundary:
-            excluded['immature_or_crosses_split'] += 1
+            if current_directional:
+                excluded['immature_or_crosses_split'] += 1
+            if counterfactual_directional:
+                counterfactual_excluded['immature_or_crosses_split'] += 1
             continue
-        if any(right['event_time']-left['event_time'] != timedelta(minutes=1)
-               for left, right in pairwise(future)) or future[0]['event_time']-decision > timedelta(minutes=1):
-            excluded['candle_gap'] += 1
+        has_gap = any(
+            right['event_time']-left['event_time'] != timedelta(minutes=1)
+            for left, right in pairwise(future)
+        ) or future[0]['event_time']-decision > timedelta(minutes=1)
+        if has_gap:
+            if current_directional:
+                excluded['candle_gap'] += 1
+            if counterfactual_directional:
+                counterfactual_excluded['candle_gap'] += 1
             continue
-        direction = 'long' if analysis.direction is EvidenceDirection.BULLISH else 'short'
-        score = prediction.long if direction == 'long' else prediction.short
-        status, net = outcome(direction, future[0], future, float(atr))
-        target_net = net_target_return(direction, float(future[0]["open"]), float(atr))
-        samples[segment].append((score, status, net, target_net))
-    reports = {}
-    for segment, data in samples.items():
-        reports[segment] = {}
-        for threshold in (.4, .5, .6, .7):
-            selected = [(status, net, target_net) for score, status, net, target_net in data if score >= threshold]
-            known = [net for _, net, _ in selected if net is not None]
-            winners = [net for status, net, _ in selected if status == "win" and net is not None]
-            reports[segment][str(threshold)] = {
-                'candidates': len(selected), 'statuses': dict(Counter(status for status, _, _ in selected)),
-                'net_positive': sum(net > 0 for net in known),
-                'tp_wins_with_nonpositive_net_return': sum(net <= 0 for net in winners),
-                'mean_net_return_of_tp_wins_pct': 100*sum(winners)/len(winners) if winners else None,
-                'candidates_with_nonpositive_net_tp_target': sum(target_net is not None and target_net <= 0 for _, _, target_net in selected),
-                'mean_net_return_pct': 100*sum(known)/len(known) if known else None,
-                'resolved_with_known_return': len(known),
-            }
+        for policy, candidate_analysis in (
+            ('current_abstain_on_conflict', analysis),
+            ('dominant_direction_counterfactual', counterfactual),
+        ):
+            if candidate_analysis.direction not in (EvidenceDirection.BULLISH, EvidenceDirection.BEARISH):
+                continue
+            prediction = model.predict(candidate_analysis)
+            direction = 'long' if candidate_analysis.direction is EvidenceDirection.BULLISH else 'short'
+            score = prediction.long if direction == 'long' else prediction.short
+            status, net = outcome(direction, future[0], future, float(atr))
+            target_net = net_target_return(direction, float(future[0]["open"]), float(atr))
+            samples[policy][segment].append((score, status, net, target_net))
+
+    reports = {
+        segment: _threshold_reports(samples['current_abstain_on_conflict'][segment])
+        for segment in ('train', 'holdout')
+    }
+    conflict_comparison = {
+        'policy': 'Research-only: choose the larger bullish/bearish evidence sum on conflicts; exact ties still abstain.',
+        'reports': {
+            segment: _threshold_reports(samples['dominant_direction_counterfactual'][segment])
+            for segment in ('train', 'holdout')
+        },
+        'excluded': dict(counterfactual_excluded),
+        'limitations': 'Uses the same states, horizon, costs, and overlapping-candidate treatment as the baseline. It is a sensitivity check, not a proposed live rule or proof of edge.',
+    }
     chosen = select_training_threshold(reports['train'])
     selected_holdout = reports['holdout'].get(chosen)
     rejection_reasons = holdout_reasons(selected_holdout)
     return {'states': len(rows), 'split_utc': split.isoformat(), 'excluded': dict(excluded),
-            'reports': reports, 'training_selected_threshold': chosen,
+            'reports': reports, 'conflict_policy_comparison': conflict_comparison,
+            'training_selected_threshold': chosen,
             'holdout_for_selected_threshold': selected_holdout,
             'research_gate_passed': not rejection_reasons,
             'rejection_reasons': rejection_reasons,
             'selection_policy': 'Training mean net return must be positive, with >=20 known returns and no ambiguous outcomes. Freeze that choice before checking holdout with the same gates. Passing is exploratory, not validation of a live strategy or calibrated model.',
-            'assumptions': f'Current model rescoring; ATR stop 1x and TP1 1.5x; market entry next candle open; {horizon} candle horizon; fee 5.5 bps and slippage 2 bps per side. Overlapping independent candidates, no portfolio simulation or live liquidity/latency guard. Ambiguous outcomes excluded from means. No runtime settings changed.'}
+            'assumptions': f'Current model rescoring; ATR stop 1x and TP1 1.5x; market entry next candle open; {horizon} candle horizon; fee 5.5 bps and slippage 2 bps per side. Overlapping candidates are not deduplicated; no portfolio simulation or live liquidity/latency guard. Ambiguous outcomes excluded from means. No runtime settings changed.'}
 
 
 def main():
