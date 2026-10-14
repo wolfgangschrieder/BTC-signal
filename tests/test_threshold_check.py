@@ -2,7 +2,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from research_os.research.threshold_check import outcome, study
+from research_os.research.threshold_check import (
+    dominant_direction_counterfactual,
+    outcome,
+    study,
+)
+from research_os.intelligence.models import AnalysisResult, EvidenceDirection
 
 
 def bar(opening=100, high=101, low=99, close=100):
@@ -43,13 +48,35 @@ def test_split_rejects_cross_boundary_and_incomplete_horizons():
     candles = []
     for index in range(11):
         time = start+timedelta(minutes=index)
-        candles.append(dict(bar(), event_time=time, point_in_time_available_at=time+timedelta(minutes=1)))
+        candles.append(dict(
+            bar(),
+            event_time=time,
+            point_in_time_available_at=time + timedelta(minutes=1),
+        ))
     result = study(rows, candles, horizon=3)
     assert result['excluded']['immature_or_crosses_split'] == 6
     assert result['reports']['train']['0.4']['candidates'] == 1
     assert result['reports']['holdout']['0.4']['candidates'] == 3
     assert result['training_selected_threshold'] is None
     assert result['reports']['train']['0.7']['candidates'] == 0
+    assert result['conflict_policy_comparison']['reports']['train']['0.4']['candidates'] == 1
+
+
+def test_conflict_counterfactual_uses_dominant_evidence_and_keeps_ties_abstaining():
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    conflict = AnalysisResult(
+        'BTCUSDT', timestamp, EvidenceDirection.CONFLICTING,
+        (), 1.5, 0.5, 1, True, 'conflict',
+    )
+    tie = AnalysisResult(
+        'BTCUSDT', timestamp, EvidenceDirection.CONFLICTING,
+        (), 1.0, 1.0, 1, True, 'conflict',
+    )
+
+    resolved = dominant_direction_counterfactual(conflict)
+    assert resolved.direction is EvidenceDirection.BULLISH
+    assert resolved.bullish_score == conflict.bullish_score
+    assert dominant_direction_counterfactual(tie).direction is EvidenceDirection.CONFLICTING
 
 
 def threshold_report(mean, samples=30, ambiguous=0):
