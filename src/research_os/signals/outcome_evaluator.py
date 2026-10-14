@@ -14,9 +14,11 @@ class SignalOutcomeEvaluator:
     """Resolves live signals against future 1m OHLC candles.
 
     signal_time is the decision time, never the source candle open time.
-    Only candles opening strictly after that decision can fill an entry;
-    new conservative policies flag an entry candle touching TP/SL as ambiguous.
-    Historical signals retain their persisted execution policy and costs.
+    Legacy policies use only candles opening strictly after that decision.
+    Conservative midpoint policies also inspect the containing minute; if its
+    OHLC touches entry and TP/SL, the outcome is ambiguous because the intrabar
+    order and pre-decision movement cannot be reconstructed. Historical signals
+    retain their persisted execution policy and costs.
 
     Entry is modeled as a limit at the persisted entry-zone midpoint.
     It is not a market-order or arbitrary-zone-fill simulation.
