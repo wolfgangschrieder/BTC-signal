@@ -30,11 +30,11 @@ class SignalOutcomeEvaluator:
         now=now or datetime.now(UTC); repo=SignalOutcomeRepository(); resolved=0
         for s in repo.pending(session,now):
             horizon=s["horizon_minutes"] or self.horizon_minutes
+            decision_minute = s["signal_time"].replace(second=0, microsecond=0)
             include_decision_minute = (
                 s.get("execution_policy") == "conservative-midpoint-v2"
                 and s["signal_time"] > decision_minute
             )
-            decision_minute = s["signal_time"].replace(second=0, microsecond=0)
             candles=session.execute(text("""SELECT event_time,open,high,low,close FROM market.candles
                 WHERE symbol=:symbol AND interval='1'
                 AND (event_time>:time OR (:include_decision_minute AND event_time=:decision_minute))
