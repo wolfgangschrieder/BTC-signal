@@ -2,9 +2,22 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+
+
+def unique_evidence_ids(value):
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return list(dict.fromkeys(value))
+    return value
+
+
+# Provider output is byte-bounded by the client. Allow complete supporting ID
+# lists while still bounding them and validating every ID against the snapshot.
+EvidenceIds = Annotated[
+    list[str], Field(min_length=1, max_length=128), BeforeValidator(unique_evidence_ids)
+]
 
 
 class Finding(BaseModel):
@@ -12,9 +25,9 @@ class Finding(BaseModel):
     kind: Literal['finding', 'hypothesis']
     topic: Literal['data_quality', 'signal_quality', 'execution_costs', 'profitability',
                    'delivery', 'storage', 'methodology', 'other']
-    severity: Literal['critical', 'high', 'medium', 'low']
+    severity: Literal['critical', 'high', 'medium', 'low', 'unspecified'] = 'unspecified'
     statement: str = Field(min_length=1, max_length=500)
-    evidence_ids: list[str] = Field(min_length=1, max_length=6)
+    evidence_ids: EvidenceIds
     verification: str = Field(min_length=1, max_length=500)
 
 
@@ -23,7 +36,7 @@ class TaskResult(BaseModel):
     task_id: str = Field(min_length=36, max_length=36)
     status: Literal['completed', 'insufficient_data']
     conclusion: str = Field(min_length=1, max_length=600)
-    evidence_ids: list[str] = Field(min_length=1, max_length=6)
+    evidence_ids: EvidenceIds
     next_check: str = Field(min_length=1, max_length=400)
 
 
@@ -31,7 +44,7 @@ class AnalystReport(BaseModel):
     model_config = ConfigDict(extra='forbid')
     verdict: Literal['insufficient_data', 'negative_evidence', 'operational_issue', 'needs_review']
     comment: str = Field(min_length=1, max_length=1200)
-    comment_evidence_ids: list[str] = Field(min_length=1, max_length=8)
+    comment_evidence_ids: EvidenceIds
     findings: list[Finding] = Field(default_factory=list, max_length=4)
 
     task_results: list[TaskResult] = Field(default_factory=list, max_length=3)
@@ -69,7 +82,8 @@ def message(report: AnalystReport, kind: str, start, end, evidence=None):
         lines.append('Основания комментария: ' + ', '.join(f'{key}={str(evidence[key])[:80]}' for key in report.comment_evidence_ids))
     for finding in report.findings:
         label = 'Гипотеза' if finding.kind == 'hypothesis' else 'Замечание'
-        lines.extend(['', f'{label} [{finding.severity}]: {finding.statement}',
+        severity = 'не указана' if finding.severity == 'unspecified' else finding.severity
+        lines.extend(['', f'{label} [{severity}]: {finding.statement}',
                       f'Основания: {", ".join(finding.evidence_ids)}',
                       f'Проверка: {finding.verification}'])
     for result in report.task_results:

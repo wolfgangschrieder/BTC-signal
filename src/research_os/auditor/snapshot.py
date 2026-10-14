@@ -7,7 +7,7 @@ from sqlalchemy import text
 from research_os.auditor.context import project_evidence
 from research_os.features.timeframes import Timeframe
 from research_os.research.observation_report import build_report
-from research_os.research.threshold_check import study
+from research_os.research.threshold_check import study_cost_comparison
 
 
 def collect_snapshot(session, end, kind, settings):
@@ -72,7 +72,17 @@ def collect_snapshot(session, end, kind, settings):
             FROM market.candles WHERE symbol='BTCUSDT' AND interval='1'
             AND event_time>=:start AND event_time<=:end AND point_in_time_available_at<=:end
             ORDER BY event_time LIMIT 1441'''), {'start':end-timedelta(days=1),'end':end}).mappings().all()
-        result = study(rows[:1440], bars)
+        result = study_cost_comparison(
+            rows[:1440], bars, configured_fee_bps=settings.execution_fee_bps,
+            configured_slippage_bps=settings.execution_slippage_bps,
+        )
+        comparison = result['configured_cost_comparison']
+        configured = comparison['report']
+        evidence['baseline.execution_costs'] = result.get('execution_costs')
+        evidence['configured_baseline.execution_costs'] = configured.get('execution_costs')
+        evidence['configured_baseline.matches_reference'] = comparison['matches_reference']
+        evidence['configured_baseline.warning'] = comparison['warning']
+        evidence['configured_baseline.research_gate_passed'] = configured.get('research_gate_passed', False)
         evidence['baseline.states_truncated'] = len(rows)>1440
         evidence['baseline.research_gate_passed'] = result.get('research_gate_passed',False)
         evidence['baseline.selected_threshold'] = result.get('training_selected_threshold')
@@ -80,8 +90,13 @@ def collect_snapshot(session, end, kind, settings):
             record = result.get('reports',{}).get('holdout',{}).get(threshold,{})
             evidence[f'baseline.holdout.{threshold}.candidates'] = record.get('candidates',0)
             evidence[f'baseline.holdout.{threshold}.mean_net_return_pct'] = record.get('mean_net_return_pct')
+            configured_record = configured.get('reports', {}).get('holdout', {}).get(threshold, {})
+            evidence[f'configured_baseline.holdout.{threshold}.mean_net_return_pct'] = configured_record.get('mean_net_return_pct')
     return {'evidence':evidence, 'limitations': report['limitations'] +
             ' Reports every four hours; tick context is four hours, capped at 240 states; monitoring is 5 minutes; daily context is 24 hours capped at 1440 states. '
             'Telegram backlog and database size are current reads, not backdated daily measurements. '
             'The daily baseline has market entry, 30-minute horizon, ATR levels and fee/slippage '
-            '5.5/2 bps per side, not live midpoint/60-minute execution. No repository code audit is performed.'}
+            '5.5/2 bps per side, not live midpoint/60-minute execution. '
+            'configured_baseline changes only costs to current settings on the same research candidates; '
+            'zero costs are optimistic assumptions, not verified tariffs or actual profit. '
+            'No repository code audit is performed.'}

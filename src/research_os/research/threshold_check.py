@@ -7,9 +7,11 @@ from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
+from math import isfinite
 
 from sqlalchemy import text
 
+from research_os.core.config import get_settings
 from research_os.database.session import SessionLocal
 from research_os.intelligence.analyzer import MarketAnalyzer
 from research_os.intelligence.models import AnalysisResult, EvidenceDirection
@@ -122,11 +124,21 @@ def _threshold_reports(data):
     return reports
 
 
-def study(rows, candles, horizon=30):
+def study(rows, candles, horizon=30, *, fee_bps=5.5, slippage_bps=2.0):
     if horizon < 1:
         raise ValueError("horizon must be positive")
+    if any(not isfinite(value) or value < 0 for value in (fee_bps, slippage_bps)):
+        raise ValueError("cost assumptions must be finite and non-negative")
+    costs = {
+        'fee_bps_per_side': fee_bps,
+        'slippage_bps_per_side': slippage_bps,
+        'round_trip_bps': 2 * (fee_bps + slippage_bps),
+        'zero_cost_assumption': fee_bps == 0 and slippage_bps == 0,
+        'scope': 'Simulation assumptions; not verified account tariffs or actual fills',
+    }
     if len(rows) < 2 or not candles:
-        return {'error': 'Need at least two saved states and confirmed candles'}
+        return {'error': 'Need at least two saved states and confirmed candles',
+                'execution_costs': costs}
     rows = sorted(rows, key=lambda row: row['decision_time'])
     candles = sorted(candles, key=lambda bar: bar['event_time'])
     candle_times = [bar['event_time'] for bar in candles]
@@ -198,8 +210,10 @@ def study(rows, candles, horizon=30):
             prediction = model.predict(candidate_analysis)
             direction = 'long' if candidate_analysis.direction is EvidenceDirection.BULLISH else 'short'
             score = prediction.long if direction == 'long' else prediction.short
-            status, net = outcome(direction, future[0], future, float(atr))
-            target_net = net_target_return(direction, float(future[0]["open"]), float(atr))
+            status, net = outcome(direction, future[0], future, float(atr),
+                                  fee_bps=fee_bps, slippage_bps=slippage_bps)
+            target_net = net_target_return(direction, float(future[0]["open"]), float(atr),
+                                           fee_bps=fee_bps, slippage_bps=slippage_bps)
             samples[policy][segment].append((score, status, net, target_net))
 
     reports = {
@@ -224,12 +238,36 @@ def study(rows, candles, horizon=30):
             'holdout_for_selected_threshold': selected_holdout,
             'research_gate_passed': not rejection_reasons,
             'rejection_reasons': rejection_reasons,
+            'execution_costs': costs,
             'selection_policy': 'Training mean net return must be positive, with >=20 known returns and no ambiguous outcomes. Freeze that choice before checking holdout with the same gates. Passing is exploratory, not validation of a live strategy or calibrated model.',
-            'assumptions': f'Current model rescoring; ATR stop 1x and TP1 1.5x; market entry next candle open; {horizon} candle horizon; fee 5.5 bps and slippage 2 bps per side. Overlapping candidates are not deduplicated; no portfolio simulation or live liquidity/latency guard. Ambiguous outcomes excluded from means. No runtime settings changed.'}
+            'assumptions': f'Current model rescoring; ATR stop 1x and TP1 1.5x; market entry next candle open; {horizon} candle horizon; fee {fee_bps:g} bps and slippage {slippage_bps:g} bps per side. Overlapping candidates are not deduplicated; no portfolio simulation or live liquidity/latency guard. Ambiguous outcomes excluded from means. No runtime settings changed.'}
+
+
+def study_cost_comparison(rows, candles, horizon=30, *, configured_fee_bps,
+                          configured_slippage_bps):
+    """Keep the fixed research reference and compare current configured costs.
+
+    Only costs vary: both runs use the same candidate selection and market-entry
+    baseline. This is not a replay of emitted live signals or their saved costs.
+    """
+    reference = study(rows, candles, horizon)
+    matches = configured_fee_bps == 5.5 and configured_slippage_bps == 2.0
+    configured = reference if matches else study(
+        rows, candles, horizon, fee_bps=configured_fee_bps,
+        slippage_bps=configured_slippage_bps,
+    )
+    return {**reference, 'configured_cost_comparison': {
+        'matches_reference': matches,
+        'scope': 'Current configured costs on the same research baseline; not historical live execution',
+        'warning': ('Zero-cost results are optimistic assumptions, not evidence of profitability after real costs'
+                    if configured_fee_bps == 0 and configured_slippage_bps == 0 else None),
+        'report': configured,
+    }}
 
 
 def main():
     as_of = datetime.now(UTC)
+    settings = get_settings()
     with SessionLocal() as session:
         session.execute(text("SET TRANSACTION READ ONLY"))
         session.execute(text("SET LOCAL statement_timeout = '5s'"))
@@ -244,7 +282,10 @@ def main():
             FROM market.candles WHERE symbol='BTCUSDT' AND interval='1' AND event_time>=:start
             AND event_time<=:now AND point_in_time_available_at<=:now
             ORDER BY event_time LIMIT 10081"""), {'start': min(row['decision_time'] for row in rows),'now':as_of}).mappings().all()
-        print(json.dumps(study(rows, candles), indent=2, ensure_ascii=False))
+        result = study_cost_comparison(rows, candles,
+                                      configured_fee_bps=settings.execution_fee_bps,
+                                      configured_slippage_bps=settings.execution_slippage_bps)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == '__main__':
