@@ -13,6 +13,15 @@ def test_safe_historical_diagnostics_do_not_export_arbitrary_database_text():
     assert safe_error('exception with private response')=='UnclassifiedError'
 
 
+def test_export_recovers_safe_fields_from_historical_truncated_diagnostic():
+    value = ('ValidationError findings.0.statement:string_type;'
+             'findings.0.evidence_ids:list_type;findings.0.verification:string_type')[:96]
+    assert safe_error(value) == (
+        'ValidationError findings.0.statement:string_type;findings.0.evidence_ids:list_type')
+    assert safe_error('ValidationError comment:validation_error') == (
+        'ValidationError comment:validation_error')
+
+
 def test_observations_include_failures_without_successful_report():
     now = datetime.now(UTC)
     session = MagicMock()

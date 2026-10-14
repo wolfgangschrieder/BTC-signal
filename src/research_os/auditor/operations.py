@@ -8,16 +8,9 @@ def safe_error(value):
     if not value:
         return None
     # Historical DB text is untrusted. Diagnostics allow only known schema paths/codes.
-    from research_os.auditor.diagnostics import FIELDS, TYPES
+    from research_os.auditor.diagnostics import safe_validation_diagnostic
     if value.startswith('ValidationError '):
-        for issue in value[len('ValidationError '):].split(';'):
-            path,separator,code = issue.partition(':')
-            if not separator or code not in TYPES:
-                return 'ValidationError'
-            if any(part not in FIELDS and part not in ('root','unknown') and
-                   not (part.isdigit() and len(part)<=2) for part in path.split('.')):
-                return 'ValidationError'
-        return value[:96]
+        return safe_validation_diagnostic(value)
     if re.fullmatch(r'[A-Za-z]{1,48}(Error|Timeout)',value):
         return value
     return 'UnclassifiedError'
