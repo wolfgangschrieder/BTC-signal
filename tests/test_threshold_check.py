@@ -6,6 +6,7 @@ from research_os.research.threshold_check import (
     dominant_direction_counterfactual,
     outcome,
     study,
+    study_cost_comparison,
 )
 from research_os.intelligence.models import AnalysisResult, EvidenceDirection
 
@@ -35,7 +36,7 @@ def test_timeout_charges_both_sides():
     assert status == 'timeout' and net < -.0011
 
 
-def test_split_rejects_cross_boundary_and_incomplete_horizons():
+def study_inputs():
     start = datetime(2026, 1, 1, tzinfo=UTC)
     rows = []
     for index in range(10):
@@ -53,6 +54,11 @@ def test_split_rejects_cross_boundary_and_incomplete_horizons():
             event_time=time,
             point_in_time_available_at=time + timedelta(minutes=1),
         ))
+    return rows, candles
+
+
+def test_split_rejects_cross_boundary_and_incomplete_horizons():
+    rows, candles = study_inputs()
     result = study(rows, candles, horizon=3)
     assert result['excluded']['immature_or_crosses_split'] == 6
     assert result['reports']['train']['0.4']['candidates'] == 1
@@ -60,6 +66,55 @@ def test_split_rejects_cross_boundary_and_incomplete_horizons():
     assert result['training_selected_threshold'] is None
     assert result['reports']['train']['0.7']['candidates'] == 0
     assert result['conflict_policy_comparison']['reports']['train']['0.4']['candidates'] == 1
+
+
+def test_cost_comparison_keeps_candidates_and_exposes_zero_cost_optimism():
+    rows, candles = study_inputs()
+    for row in rows:
+        row['vector']['values']['atr_14'] = .01
+    for candle in candles:
+        candle.update(high=100.03, low=100)
+    result = study_cost_comparison(rows, candles, horizon=3,
+                                   configured_fee_bps=0, configured_slippage_bps=0)
+    comparison = result['configured_cost_comparison']
+    configured = comparison['report']
+    assert not comparison['matches_reference'] and comparison['warning']
+    assert result['execution_costs']['round_trip_bps'] == 15
+    assert configured['execution_costs']['zero_cost_assumption']
+    assert 'fee 0 bps and slippage 0 bps' in configured['assumptions']
+    assert result['excluded'] == configured['excluded']
+    for reports in ('reports', 'conflict_policy_comparison'):
+        reference_reports = result[reports]
+        configured_reports = configured[reports]
+        if reports == 'conflict_policy_comparison':
+            reference_reports = reference_reports['reports']
+            configured_reports = configured_reports['reports']
+        for segment in ('train', 'holdout'):
+            charged = reference_reports[segment]['0.4']
+            free = configured_reports[segment]['0.4']
+            assert charged['candidates'] == free['candidates'] > 0
+            assert charged['statuses'] == free['statuses']
+            assert charged['mean_net_return_pct'] < 0 < free['mean_net_return_pct']
+            assert charged['candidates_with_nonpositive_net_tp_target'] > 0
+            assert free['candidates_with_nonpositive_net_tp_target'] == 0
+
+
+def test_matching_cost_scenario_serializes_without_a_recursive_report():
+    import json
+
+    result = study_cost_comparison(*study_inputs(), horizon=3,
+                                   configured_fee_bps=5.5, configured_slippage_bps=2)
+    comparison = result['configured_cost_comparison']
+    assert comparison['matches_reference'] and comparison['warning'] is None
+    assert comparison['report']['reports'] == result['reports']
+    assert json.loads(json.dumps(result))['execution_costs']['fee_bps_per_side'] == 5.5
+
+
+@pytest.mark.parametrize('cost', [-1, float('nan'), float('inf')])
+@pytest.mark.parametrize('field', ['fee_bps', 'slippage_bps'])
+def test_invalid_cost_assumptions_are_rejected(cost, field):
+    with pytest.raises(ValueError, match='finite and non-negative'):
+        study([], [], **{field: cost})
 
 
 def test_conflict_counterfactual_uses_dominant_evidence_and_keeps_ties_abstaining():

@@ -42,6 +42,62 @@ def test_unknown_evidence_and_credentials_are_rejected():
         AnalystReport.model_validate(bad).validate_evidence({'cohort.completed':0})
 
 
+@pytest.mark.asyncio
+async def test_provider_long_evidence_lists_and_missing_severity_remain_auditable():
+    evidence = {f'fact.{index}': index for index in range(12)}
+    identifiers = list(evidence)
+    identity = '00000000-0000-0000-0000-000000000001'
+    data = report_data() | {
+        'comment_evidence_ids': identifiers + identifiers[:2],
+        'findings': [{'kind': 'finding', 'topic': 'methodology',
+                      'statement': 'Нужна проверка.', 'evidence_ids': identifiers,
+                      'verification': 'Сверить исходы.'}],
+        'task_results': [{'task_id': identity, 'status': 'insufficient_data',
+                          'conclusion': 'Данных недостаточно.', 'evidence_ids': identifiers,
+                          'next_check': 'Дождаться исходов.'}],
+    }
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={'choices': [{
+        'finish_reason': 'stop', 'message': {'content': json.dumps(data)}}]}))
+    payload = json.dumps({'tasks': [{'task_id': identity}]})
+    report, _ = await DeepSeekAnalyst('placeholder', 'deepseek-flash', transport).analyze(
+        payload, evidence
+    )
+    assert report.comment_evidence_ids == identifiers
+    assert report.findings[0].evidence_ids == identifiers
+    assert report.task_results[0].evidence_ids == identifiers
+    assert report.findings[0].severity == 'unspecified'
+    assert 'Замечание [не указана]' in message(report, 'daily', NOW, NOW, evidence)
+
+
+@pytest.mark.parametrize('target', ['comment', 'finding', 'task'])
+def test_unknown_evidence_after_old_list_limit_is_still_rejected(target):
+    evidence = {f'fact.{index}': index for index in range(12)}
+    identifiers = list(evidence) + ['unknown.final']
+    data = report_data() | {'comment_evidence_ids': list(evidence)}
+    if target == 'comment':
+        data['comment_evidence_ids'] = identifiers
+    elif target == 'finding':
+        data['findings'] = [{'kind': 'finding', 'topic': 'other',
+                             'statement': 'Проверить.', 'verification': 'Измерить.',
+                             'evidence_ids': identifiers}]
+    else:
+        data['task_results'] = [{'task_id': '00000000-0000-0000-0000-000000000001',
+                                'status': 'completed', 'conclusion': 'План.',
+                                'next_check': 'Проверить.', 'evidence_ids': identifiers}]
+    with pytest.raises(ValueError, match='[Uu]nknown'):
+        AnalystReport.model_validate(data).validate_evidence(evidence)
+
+
+def test_evidence_and_severity_validation_remain_bounded():
+    with pytest.raises(ValidationError):
+        AnalystReport.model_validate(report_data() | {'comment_evidence_ids': [str(i) for i in range(129)]})
+    with pytest.raises(ValidationError):
+        AnalystReport.model_validate(report_data() | {'findings': [{
+            'kind': 'finding', 'topic': 'other', 'severity': 'invented',
+            'statement': 'Проверить.', 'verification': 'Измерить.',
+            'evidence_ids': ['cohort.completed']}]})
+
+
 def test_idle_comment_is_valid_and_telegram_is_bounded():
     report = AnalystReport.model_validate(report_data()).validate_evidence({'cohort.completed':0})
     body = message(report,'tick',NOW-timedelta(minutes=5),NOW,{'cohort.completed':0})
@@ -198,6 +254,23 @@ def test_snapshot_queries_real_schema_and_has_no_secrets():
         payload, size = prepare_prompt(snapshot,[])
         assert size<=16000
         assert 'DEEPSEEK_API_KEY' not in payload and 'TELEGRAM_BOT_TOKEN' not in payload
+
+
+@pytest.mark.skipif(not os.getenv('DATABASE_URL'), reason='requires migrated PostgreSQL')
+def test_daily_snapshot_labels_reference_and_configured_costs():
+    from research_os.auditor.snapshot import collect_snapshot
+
+    settings = Settings(execution_fee_bps=0, execution_slippage_bps=0)
+    with SessionLocal() as session:
+        snapshot = collect_snapshot(session, datetime.now(UTC), 'daily', settings)
+        evidence = snapshot['evidence']
+        assert evidence['baseline.execution_costs']['round_trip_bps'] == 15
+        assert evidence['configured_baseline.execution_costs']['zero_cost_assumption']
+        assert evidence['configured_baseline.warning']
+        assert not evidence['configured_baseline.matches_reference']
+        assert 'configured_baseline.holdout.0.7.mean_net_return_pct' in evidence
+        _, size = prepare_prompt(snapshot, [])
+        assert size <= 16000
 
 
 @pytest.mark.asyncio
