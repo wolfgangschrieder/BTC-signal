@@ -76,7 +76,7 @@ def status(db):
 
 @pytest.mark.parametrize("direction", ["long", "short"])
 @pytest.mark.parametrize("policy,expected", [("legacy-entry-only", "win"), ("conservative-midpoint-v2", "ambiguous")])
-def test_delayed_decision_excludes_existing_candles_and_matches_replay(db, direction, policy, expected):
+def test_delayed_decision_matches_replay_for_persisted_policy(db, direction, policy, expected):
     from types import SimpleNamespace
 
     t = datetime(2026, 1, 1, tzinfo=UTC)
