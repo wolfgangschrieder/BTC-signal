@@ -132,3 +132,54 @@ Optional service `report-export` обновляет два пользовате�
 папке Google Drive. Отдельный service-account key монтируется только в экспортёр.
 Это не авторизация через ChatGPT Drive: доступ VPS настраивается отдельно.
 См. [DRIVE_EXPORT.md](DRIVE_EXPORT.md).
+
+### Восстановление после ошибок (миграция 0020)
+
+Для текущего окна daily/periodic допускаются максимум две попытки, с паузой
+не менее 30 минут от начала первой. Повтор возможен только после `failed`;
+`started` с неизвестным результатом автоматически не повторяется. Каждая попытка
+имеет отдельный UUID и `attempt_number`; исходная ошибка и резерв токенов остаются.
+Обе попытки входят в общий дневной лимит запросов и токенов. При исчерпании бюджета
+новый API-запрос не запускается. Старые окна массово не переигрываются: при старте
+сервис проверяет последнее закрытое четырёхчасовое окно и предыдущие московские сутки.
+
+Монитор создаёт максимум по одной дочерней задаче для failed-задач за последние
+семь дней после паузы 30 минут; `context.retry_of` связывает записи. Дочерние задачи
+не порождают повторы, `insufficient_data` не повторяется. Drive-запросы исключены:
+для них сохраняются собственные сроки и протокол подтверждений. Задачи оплачиваются
+только как часть обычного бюджетируемого периодического отчёта, а не отдельными API-вызовами.
+
+`history.restoration` показывает число PIT-доступных сохранённых свечей,
+отсутствие raw-подтверждения, длину непрерывного восстановимого хвоста, полные
+UTC-бары 1h/4h/1d и причину остановки. Это диагностика пути восстановления из БД.
+`history.latest_recorded_memory` берёт записанный app размер реального ценового
+буфера и его границы из последнего state не старше 10 минут; в старых states
+эти поля отсутствуют. Сырые candle-события штатная шестичасовая очистка не удаляет;
+отсутствие raw само по себе не доказывает причину удаления. Пропуски не заполняются.
+
+Автообновление блокирует релизы с миграциями. Для применения из `/opt/BTC-signal`
+остановите timer и дождитесь завершения уже запущенного service. Затем:
+
+```bash
+sudo systemctl stop btc-signal-auto-update.timer
+# Убедитесь, что service уже завершён:
+systemctl is-active btc-signal-auto-update.service
+# Продолжайте только после inactive (или failed), не во время activating/active.
+git pull --ff-only origin main
+# Внешнюю резервную копию БД создайте по инструкции deploy/README.md.
+docker compose --env-file deploy/.env -f deploy/compose.yml build migrate
+# Остановите только аналитик на время изменения его журнала:
+docker compose --env-file deploy/.env -f deploy/compose.yml --profile auditor stop auditor
+docker compose --env-file deploy/.env -f deploy/compose.yml run --rm migrate
+# Продолжайте только при exit code 0:
+docker compose --env-file deploy/.env -f deploy/compose.yml --profile auditor --profile report-export up -d --no-deps --force-recreate app auditor report-export
+sudo systemctl start btc-signal-auto-update.timer
+docker compose --env-file deploy/.env -f deploy/compose.yml --profile auditor logs --tail 80 auditor
+```
+
+Команды без updater override намеренно пересоздают указанные сервисы новым
+`btc-signal:local`. После успешной ручной миграции текущий git HEAD становится
+базой следующих автоматических обновлений. Миграция не стирает отчёты; downgrade
+откажется восстанавливать старую уникальность, если уже накоплены две попытки.
+Новый daily считается восстановленным только после `status=completed` и появления
+свежего суточного окна на Drive; новый SHA или heartbeat этого не подтверждают.

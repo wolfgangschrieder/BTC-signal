@@ -109,3 +109,28 @@ def test_real_database_excludes_unconfirmed_and_late_available_bars():
             session.execute(text('DELETE FROM market.candles WHERE symbol=:symbol'),{'symbol':symbol})
             session.execute(text('DELETE FROM raw.events WHERE symbol=:symbol'),{'symbol':symbol})
             session.commit()
+
+
+def test_restoration_diagnostic_distinguishes_gap_raw_loss_and_invalid_prices():
+    from research_os.pipeline.history import describe_history
+    def stored(minute, **changes):
+        return row(minute,raw_present=True,eligible=True,**changes)
+    diagnostic = describe_history([stored(1),stored(2),stored(4)],BEFORE)
+    assert diagnostic['restorable_contiguous_minutes']==2
+    assert diagnostic['boundary_reason']=='no_stored_bar_at_boundary'
+    rows = [stored(1),row(2,raw_present=False,eligible=False),stored(3)]
+    diagnostic = describe_history(rows,BEFORE)
+    assert diagnostic['eligible_rows']==2 and diagnostic['raw_missing_rows']==1
+    assert diagnostic['restorable_contiguous_minutes']==1
+    assert diagnostic['boundary_reason']=='raw_confirmation_unavailable'
+    diagnostic = describe_history([stored(1,close=float('nan'))],BEFORE)
+    assert diagnostic['boundary_reason']=='invalid_ohlcv'
+    assert diagnostic['restorable_contiguous_minutes']==0
+
+
+def test_restoration_diagnostic_counts_only_complete_utc_timeframes():
+    from research_os.pipeline.history import describe_history
+    rows = [row(i,raw_present=True,eligible=True) for i in range(1,481)]
+    result = describe_history(rows,BEFORE)
+    assert result['complete_restorable_bars']=={'1h':8,'4h':2,'1d':0}
+    assert result['boundary_reason']=='end_of_scanned_history'

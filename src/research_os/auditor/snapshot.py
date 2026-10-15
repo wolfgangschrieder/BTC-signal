@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from research_os.auditor.context import project_evidence
 from research_os.features.timeframes import Timeframe
+from research_os.pipeline.history import history_diagnostic
 from research_os.research.observation_report import build_report
 from research_os.research.threshold_check import study_cost_comparison
 
@@ -62,6 +63,17 @@ def collect_snapshot(session, end, kind, settings):
     evidence['history.first_minute_utc'] = history['first'].isoformat() if history['first'] else None
     evidence['history.last_minute_utc'] = history['last'].isoformat() if history['last'] else None
     evidence['history.limitations'] = 'Stored PIT-available minute rows; not proof of contiguous bars or application in-memory history'
+    evidence['history.restoration'] = history_diagnostic(
+        session, 'BTCUSDT', end.replace(second=0,microsecond=0), end, settings.live_history_minutes)
+    memory = session.execute(text("""SELECT decision_time,data_quality
+        FROM world.market_state_vectors WHERE symbol='BTCUSDT' AND decision_time<=:end
+          AND decision_time>=:lower ORDER BY decision_time DESC LIMIT 1"""),
+        {'end':end,'lower':end-timedelta(minutes=10)}).mappings().first()
+    evidence['history.latest_recorded_memory'] = ({
+        'decision_time':memory['decision_time'].isoformat(),
+        **{key:memory['data_quality'].get(key) for key in (
+            'price_history_minutes','price_history_first_utc','price_history_last_utc')}
+    } if memory else None)
     # The daily study uses this baseline's own fixed costs and market-entry assumptions.
     if kind == 'daily':
         rows = session.execute(text('''SELECT symbol,timestamp,decision_time,point_in_time_available_at,

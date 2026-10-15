@@ -11,7 +11,7 @@ from sqlalchemy import text
 from research_os.auditor.client import DeepSeekAnalyst, prepare_prompt
 from research_os.auditor.diagnostics import failure_diagnostic
 from research_os.auditor.models import AnalystReport, message, message_parts, summary_message
-from research_os.auditor.repository import AuditorRepository
+from research_os.auditor.repository import AuditorRepository, retry_allowed
 from research_os.auditor.snapshot import collect_snapshot
 from research_os.auditor.tasks import TaskRepository, discover_tasks, operational_findings
 from research_os.core.config import get_settings
@@ -56,8 +56,9 @@ class AuditorService:
     def _exists(self, kind, start):
         with self.session_factory() as session:
             session.execute(text("SET LOCAL statement_timeout = '5s'"))
-            return bool(session.execute(text('SELECT 1 FROM intelligence.auditor_runs WHERE kind=:kind AND period_start=:start'),
-                                        {'kind':kind,'start':start}).first())
+            rows = session.execute(text('SELECT status,created_at FROM intelligence.auditor_runs WHERE kind=:kind AND period_start=:start ORDER BY attempt_number'),
+                                   {'kind':kind,'start':start}).mappings().all()
+            return not retry_allowed(rows, datetime.now(UTC))
 
     def _snapshot(self, kind, end):
         with self.session_factory() as session:
@@ -135,6 +136,7 @@ class AuditorService:
             session.execute(text("SET LOCAL statement_timeout = '5s'"))
             session.execute(text('SELECT pg_advisory_xact_lock(8247132)'))
             self.tasks.prune(session, now)
+            self.tasks.recover_failed(session, now)
             discover_tasks(session, snapshot['evidence'], now, self.tasks)
             issues = operational_findings(snapshot['evidence'])
             # One alert per issue per Moscow day; every check still updates task discovery.
