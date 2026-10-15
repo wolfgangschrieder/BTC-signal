@@ -64,7 +64,7 @@ def collect_snapshot(session, end, kind, settings):
     evidence['history.last_minute_utc'] = history['last'].isoformat() if history['last'] else None
     evidence['history.limitations'] = 'Stored PIT-available minute rows; not proof of contiguous bars or application in-memory history'
     evidence['history.restoration'] = history_diagnostic(
-        session, 'BTCUSDT', end.replace(second=0,microsecond=0), end, settings.live_history_minutes)
+        session, 'BTCUSDT', end.replace(second=0,microsecond=0), end, min(settings.live_history_minutes,10080))
     memory = session.execute(text("""SELECT decision_time,data_quality
         FROM world.market_state_vectors WHERE symbol='BTCUSDT' AND decision_time<=:end
           AND decision_time>=:lower ORDER BY decision_time DESC LIMIT 1"""),
