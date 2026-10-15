@@ -74,3 +74,23 @@ def test_failed_task_gets_one_child_and_expired_drive_requests_are_not_replayed(
             assert session.execute(text('SELECT 1 FROM intelligence.auditor_tasks WHERE dedup_key=:key'),{'key':'retry:'+str(child)}).first() is None
         finally:
             session.rollback()
+
+
+@pytest.mark.skipif(not os.getenv('DATABASE_URL'),reason='requires migrated PostgreSQL')
+def test_unknown_spend_run_does_not_replay_its_crashed_task():
+    now = datetime.now(UTC)
+    tasks = TaskRepository()
+    with SessionLocal() as session:
+        try:
+            session.execute(text('SELECT pg_advisory_xact_lock(8247132)'))
+            identity = str(tasks.enqueue(session,'costs','test:'+str(uuid4()),{}))
+            run = AuditorRepository().reserve(session,kind='periodic',start=now-timedelta(hours=4),
+                end=now,snapshot={'tasks':[{'task_id':identity}]},model='test',tokens=100,
+                budget_start=now-timedelta(seconds=1),budget_end=now+timedelta(days=1),daily_budget=1000)
+            assert run
+            tasks.prune(session,now+timedelta(minutes=11))
+            tasks.recover_failed(session,now+timedelta(minutes=42))
+            assert session.execute(text('SELECT 1 FROM intelligence.auditor_tasks WHERE dedup_key=:key'),
+                                   {'key':'retry:'+identity}).first() is None
+        finally:
+            session.rollback()

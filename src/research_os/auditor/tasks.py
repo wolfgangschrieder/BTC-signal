@@ -31,6 +31,8 @@ class TaskRepository:
         rows = session.execute(text("""SELECT task_id,kind,context,priority
             FROM intelligence.auditor_tasks original
             WHERE status='failed' AND updated_at<=:cutoff AND updated_at>=:old
+              AND (run_id IS NULL OR EXISTS (SELECT 1 FROM intelligence.auditor_runs run
+                  WHERE run.run_id=original.run_id AND run.status='failed'))
               AND NOT (context ? 'retry_of')
               AND NOT EXISTS (SELECT 1 FROM intelligence.auditor_tasks retry
                   WHERE retry.dedup_key='retry:' || original.task_id::text)
