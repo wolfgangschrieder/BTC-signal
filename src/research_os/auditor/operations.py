@@ -19,7 +19,7 @@ def safe_error(value):
 def operational_status(session, now):
     from research_os.auditor.deployment_status import read_deployment_status
     attempts = session.execute(text("""SELECT run_id,kind,period_start,period_end,status,
-        error_type,created_at FROM intelligence.auditor_runs
+        error_type,created_at,attempt_number,tokens FROM intelligence.auditor_runs
         WHERE kind IN ('periodic','daily') ORDER BY created_at DESC LIMIT 12""")).mappings().all()
     decision = session.execute(text("""SELECT decision_time FROM world.market_state_vectors
         WHERE symbol='BTCUSDT' ORDER BY decision_time DESC LIMIT 1""")).scalar_one_or_none()

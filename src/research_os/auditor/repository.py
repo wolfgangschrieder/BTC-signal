@@ -8,14 +8,22 @@ from sqlalchemy import text
 from research_os.auditor.diagnostics import failure_diagnostic
 
 
+def retry_allowed(rows, now):
+    """At most two paid attempts; uncertain started calls never trigger another call."""
+    return not rows or (len(rows) == 1 and rows[0]['status'] == 'failed'
+                        and rows[0]['created_at'] <= now-timedelta(minutes=30))
+
+
 class AuditorRepository:
     def reserve(self, session, *, kind, start, end, snapshot, model, tokens,
                 budget_start, budget_end, daily_budget, daily_requests=50):
         session.execute(text("SET LOCAL statement_timeout = '5s'"))
         # A global transaction lock keeps overlapping workers inside one budget.
         session.execute(text('SELECT pg_advisory_xact_lock(8247132)'))
-        if session.execute(text('SELECT 1 FROM intelligence.auditor_runs WHERE kind=:kind AND period_start=:start'),
-                           {'kind':kind,'start':start}).first():
+        rows = session.execute(text('SELECT status,created_at FROM intelligence.auditor_runs WHERE kind=:kind AND period_start=:start ORDER BY attempt_number'),
+                               {'kind':kind,'start':start}).mappings().all()
+        now = session.execute(text('SELECT clock_timestamp()')).scalar_one()
+        if not retry_allowed(rows, now):
             return None
         usage = session.execute(text('''SELECT count(*) AS n,coalesce(sum(tokens),0) AS tokens
             FROM intelligence.auditor_runs WHERE tokens>0 AND created_at>=:start AND created_at<:end'''),
@@ -29,9 +37,9 @@ class AuditorRepository:
                 return None
         identity = str(uuid4())
         session.execute(text('''INSERT INTO intelligence.auditor_runs
-            (run_id,kind,period_start,period_end,status,model,tokens,snapshot,delivery_until)
-            VALUES (:id,:kind,:start,:end,'started',:model,:tokens,CAST(:snapshot AS jsonb),:until)'''),
-            {'id':identity,'kind':kind,'start':start,'end':end,'model':model,'tokens':tokens,
+            (run_id,kind,period_start,period_end,status,model,tokens,snapshot,delivery_until,attempt_number)
+            VALUES (:id,:kind,:start,:end,'started',:model,:tokens,CAST(:snapshot AS jsonb),:until,:attempt)'''),
+            {'attempt':len(rows)+1,'id':identity,'kind':kind,'start':start,'end':end,'model':model,'tokens':tokens,
              'snapshot':json.dumps(snapshot,ensure_ascii=False),
              'until':end+timedelta(hours=24) if kind=='daily' else end+timedelta(hours=4)})
         for task in snapshot.get('tasks', []):

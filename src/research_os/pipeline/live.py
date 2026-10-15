@@ -322,6 +322,11 @@ class LiveSignalService:
                     availability.update(macro_availability)
                     if any(macro_availability.values()):
                         state_pit = max(state_pit, datetime.fromisoformat(macro_quality["cross_market_cache_loaded_at"]))
+                macro_quality.update({
+                    'price_history_minutes':str(len(bars)),
+                    'price_history_first_utc':bars[0].timestamp.isoformat() if bars else '',
+                    'price_history_last_utc':bars[-1].timestamp.isoformat() if bars else '',
+                })
                 _stage_start=perf_counter()
                 state=await self.builder.build_multi_async(self.symbol,event.event_time,now,state_pit,mtf_snapshot,base_snapshot=snap,extra_values=extra,extra_availability=availability,data_quality=macro_quality)
                 self.latency.observe("state_build", (perf_counter()-_stage_start)*1000.0)

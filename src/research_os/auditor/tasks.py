@@ -26,6 +26,25 @@ class TaskRepository:
             {'id':identity,'key':key,'kind':kind,'priority':priority,
              'context':json.dumps(context,ensure_ascii=False)}).scalar_one_or_none()
 
+    def recover_failed(self, session, now):
+        # Caller holds the shared advisory lock. Keep original failure/run and cost records.
+        rows = session.execute(text("""SELECT task_id,kind,context,priority
+            FROM intelligence.auditor_tasks original
+            WHERE status='failed' AND updated_at<=:cutoff AND updated_at>=:old
+              AND (run_id IS NULL OR EXISTS (SELECT 1 FROM intelligence.auditor_runs run
+                  WHERE run.run_id=original.run_id AND run.status='failed'))
+              AND NOT (context ? 'retry_of')
+              AND NOT EXISTS (SELECT 1 FROM intelligence.auditor_tasks retry
+                  WHERE retry.dedup_key='retry:' || original.task_id::text)
+              AND context->>'source' IS DISTINCT FROM 'drive'
+            ORDER BY priority,updated_at LIMIT 3"""),
+            {'cutoff':now-timedelta(minutes=30),'old':now-timedelta(days=7)}).mappings().all()
+        for row in rows:
+            context = {**row['context'], 'retry_of':str(row['task_id']), 'retry_limit':1}
+            # Never overflow the original context bound when adding provenance.
+            if len(json.dumps(context,ensure_ascii=False).encode())<=7500:
+                self.enqueue(session,row['kind'],'retry:'+str(row['task_id']),context,row['priority'])
+
     def pending(self, session):
         rows = session.execute(text("""SELECT task_id,kind,context FROM intelligence.auditor_tasks
             WHERE status='waiting' AND (context->>'source' IS DISTINCT FROM 'drive'
