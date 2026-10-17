@@ -183,3 +183,35 @@ def test_committed_cooldown_restore_query_returns_latest_per_direction(db):
     db.execute(text("UPDATE signal_outcomes SET signal_time=:time WHERE signal_id='time-boundary-audit'"), {"time":t+timedelta(minutes=5)})
     rows = SignalOutcomeRepository().latest_emissions(db, "AUDIT-TIME-BTC")
     assert len(rows) == 1 and rows[0]["signal_time"] == t+timedelta(minutes=5)
+
+
+@pytest.mark.parametrize('filled', [True, False])
+def test_expiry_separates_unfilled_from_marked_hypothetical_position(db, filled):
+    t = datetime(2026, 1, 1, tzinfo=UTC)
+    pending(db, t, fee_bps=5, slippage_bps=2)
+    for minute in range(1, 10):
+        store_candle(db, t+timedelta(minutes=minute), 100.5, 99.5 if filled else 100.2)
+    SignalOutcomeEvaluator().resolve_pending(db, t+timedelta(minutes=11))
+    row = db.execute(text("SELECT execution_state,horizon_return,realized_return FROM signal_outcomes WHERE signal_id='time-boundary-audit'")).mappings().one()
+    assert row['execution_state'] == ('filled_expired' if filled else 'unfilled')
+    assert row['realized_return'] is None
+    if filled:
+        assert float(row['horizon_return']) == pytest.approx((100*(1-.0002)-100*(1+.0002))/(100*(1+.0002))-.001)
+    else:
+        assert row['horizon_return'] is None
+
+
+def test_forecast_resolves_after_trade_already_resolved_without_requiring_fill(db):
+    from research_os.signals.forecast_evaluator import SignalForecastEvaluator
+    t = datetime(2026, 1, 1, tzinfo=UTC)
+    pending(db, t)
+    store_candle(db, t-timedelta(minutes=1), 100, 100, available=t)
+    for minute in range(15):
+        store_candle(db, t+timedelta(minutes=minute), 102, 101)
+    db.execute(text("UPDATE market.candles SET close=102 WHERE symbol='AUDIT-TIME-BTC' AND event_time>=:t"), {'t':t})
+    db.execute(text("UPDATE signal_outcomes SET status='expired' WHERE signal_id='time-boundary-audit'"))
+    assert SignalForecastEvaluator().resolve(db,t+timedelta(minutes=16)) == 1
+    row = db.execute(text("SELECT * FROM signal_forecasts WHERE signal_id='time-boundary-audit' AND horizon_minutes=15")).mappings().one()
+    assert row['status'] == 'completed'
+    assert row['directional_return'] == pytest.approx(.02)
+    assert row['reference_price'] == 100
