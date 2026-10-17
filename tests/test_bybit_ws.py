@@ -222,3 +222,22 @@ async def test_real_local_transport_closes_when_server_does_not_pong():
         with pytest.raises(ConnectionError, match="pong timeout"):
             await asyncio.wait_for(ws._run_connection(), 1)
         assert ws._connection is None
+
+
+@pytest.mark.asyncio
+async def test_pong_bypasses_queued_market_work():
+    import asyncio
+    import time
+    from unittest.mock import AsyncMock
+    handler = AsyncMock()
+    ws = BybitWebSocket(["kline.1.BTCUSDT"], handler)
+    queue = asyncio.Queue(maxsize=1)
+    await ws._handle_message('{"topic":"kline.1.BTCUSDT"}', market_queue=queue)
+    assert queue.qsize() == 1
+    handler.assert_not_awaited()
+    ws._ping_sent_monotonic = time.monotonic()
+    await ws._handle_message('{"op":"pong"}', market_queue=queue)
+    assert ws._pong.is_set()
+    assert queue.qsize() == 1
+    with pytest.raises(Exception, match="queue overflow"):
+        await ws._handle_message('{"topic":"kline.1.BTCUSDT"}', market_queue=queue)

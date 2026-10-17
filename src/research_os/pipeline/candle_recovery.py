@@ -53,7 +53,7 @@ def persist_missing(events):
                 **{name: Decimal(p[name]) for name in
                    ("open", "high", "low", "close", "volume", "turnover")}
             ).on_conflict_do_nothing(index_elements=["symbol", "interval", "event_time"])
-            inserted += session.execute(statement).rowcount
+            inserted += int(session.execute(statement.returning(Candle.event_time)).scalar_one_or_none() is not None)
         session.commit()
     return inserted
 

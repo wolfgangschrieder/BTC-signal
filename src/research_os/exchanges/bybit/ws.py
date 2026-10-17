@@ -136,6 +136,15 @@ class BybitWebSocket:
             self._last_latency_at = None
             await self._subscribe(websocket)
             ping_task = asyncio.create_task(self._application_ping_loop(websocket))
+            market_queue = asyncio.Queue(maxsize=10000)
+            async def dispatch_market():
+                while True:
+                    message = await market_queue.get()
+                    try:
+                        await self._handle_message(message)
+                    finally:
+                        market_queue.task_done()
+            market_task = asyncio.create_task(dispatch_market())
             try:
                 while not self._stop.is_set():
                     try:
@@ -143,10 +152,13 @@ class BybitWebSocket:
                         receive = asyncio.create_task(websocket.recv())
                         try:
                             done, _ = await asyncio.wait(
-                                (receive, ping_task),
+                                (receive, ping_task, market_task),
                                 timeout=self._config.receive_timeout_seconds,
                                 return_when=asyncio.FIRST_COMPLETED,
                             )
+                            if market_task in done:
+                                market_task.result()
+                                raise ConnectionError("Bybit market dispatcher stopped")
                             if ping_task in done:
                                 ping_task.result()
                                 raise ConnectionError("Bybit ping loop stopped")
@@ -164,11 +176,12 @@ class BybitWebSocket:
                             )
                     except TimeoutError as exc:
                         raise ConnectionError("Bybit WebSocket receive timeout") from exc
-                    await self._handle_message(message)
+                    await self._handle_message(message, market_queue=market_queue)
             finally:
                 self._connection = None
                 ping_task.cancel()
-                await asyncio.gather(ping_task, return_exceptions=True)
+                market_task.cancel()
+                await asyncio.gather(ping_task, market_task, return_exceptions=True)
 
     async def _application_ping_loop(self, websocket: ClientConnection) -> None:
         while not self._stop.is_set():
@@ -185,7 +198,7 @@ class BybitWebSocket:
         payload = {"op": "subscribe", "args": list(self._topics)}
         await websocket.send(json.dumps(payload))
 
-    async def _handle_message(self, message: str | bytes) -> None:
+    async def _handle_message(self, message: str | bytes, market_queue=None) -> None:
         try:
             decode_started = time.perf_counter()
             decoded = json.loads(message)
@@ -217,6 +230,13 @@ class BybitWebSocket:
         if decoded.get("op") == "subscribe":
             if decoded.get("success") is False:
                 raise BybitReconnectRequired("Bybit rejected subscription")
+            return
+
+        if market_queue is not None:
+            try:
+                market_queue.put_nowait(message)
+            except asyncio.QueueFull as error:
+                raise BybitReconnectRequired("Bybit market dispatch queue overflow") from error
             return
 
         started = time.monotonic()
