@@ -66,6 +66,7 @@ class LiveSignalService:
         self._liquidity_compute_interval_seconds=0.05
         self._last_candle_start=None
         self._history_restore_pending = True
+        self._history_available_at = None
         self.orderbook=OrderBook(symbol,max_levels=50)
         self.rest=BybitRestClient()
         self._last_orderbook_update=datetime.min.replace(tzinfo=timezone.utc)
@@ -146,6 +147,7 @@ class LiveSignalService:
         self.previous_derivatives_price = self.previous_funding = self.previous_oi = None
         self._last_candle_start = None
         self._history_restore_pending = True
+        self._history_available_at = None
 
     def _load_price_history(self, before, as_of):
         from research_os.pipeline.history import load_history
@@ -158,11 +160,22 @@ class LiveSignalService:
             return
         try:
             bars = await asyncio.to_thread(self._load_price_history,before,datetime.now(timezone.utc))
+            limit = min(self.bars_1m.maxlen, 10080)
+            if len(bars) < limit:
+                from research_os.pipeline.candle_recovery import recover_history
+                try:
+                    repaired = await asyncio.wait_for(
+                        recover_history(self.rest, self.symbol, before, limit), timeout=30)
+                    logger.info("REST candle recovery inserted=%s", repaired)
+                except Exception as error:
+                    logger.warning("REST candle recovery unavailable (%s)", type(error).__name__)
+                bars = await asyncio.to_thread(self._load_price_history,before,datetime.now(timezone.utc))
         except Exception as error:  # noqa: BLE001 - unavailable history means warmup, never fabricated bars
             logger.warning('Price history restore failed (%s); warming up',type(error).__name__)
             return
         for history in (self.closes,self.highs,self.lows,self.bars_1m):
             history.clear()
+        self._history_available_at = datetime.now(timezone.utc) if bars else None
         self.bars_1m.extend(bars)
         self.closes.extend(bar.close for bar in bars)
         self.highs.extend(bar.high for bar in bars)
@@ -212,7 +225,8 @@ class LiveSignalService:
                         history.clear()
                     self._previous_candle_flow_price = None
                     self._previous_candle_cvd = self.cumulative_delta
-                    logger.warning('Candle gap detected; price features warming up')
+                    logger.warning('Candle gap detected; restoring price history')
+                    await self._restore_price_history(event.event_time)
                 self._last_candle_start=event.event_time
                 self.closes.append(float(p["close"])); self.highs.append(float(p["high"])); self.lows.append(float(p["low"]))
                 self.bars_1m.append(OHLCVBar(event.event_time,float(p["open"]),float(p["high"]),float(p["low"]),float(p["close"]),float(p["volume"])))
@@ -315,7 +329,7 @@ class LiveSignalService:
                 availability={key: ((ofi_norm.available and value is not None) if key.startswith("orderflow_ofi_") else (flow.available and value is not None) if key.startswith("orderflow_") else (deriv.available and value is not None)) for key,value in extra.items()}
                 for key,value in liquidity_values.items(): availability[key]=liquidity_state.valid and value is not None
                 macro_quality = {}
-                state_pit = event.point_in_time_available_at
+                state_pit = max(event.point_in_time_available_at, self._history_available_at) if self._history_available_at else event.point_in_time_available_at
                 if self.macro_context is not None:
                     macro_values, macro_availability, macro_quality = self.macro_context.features(event.event_time, now)
                     extra.update(macro_values)

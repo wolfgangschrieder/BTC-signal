@@ -8,6 +8,12 @@ import pytest
 from research_os.pipeline.history import contiguous_suffix, load_history
 from research_os.pipeline.live import LiveSignalService
 
+@pytest.fixture(autouse=True)
+def no_rest_recovery(monkeypatch):
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr("research_os.pipeline.candle_recovery.recover_history", AsyncMock(return_value=0))
+
+
 BEFORE = datetime(2026,10,13,0,0,tzinfo=UTC)
 
 

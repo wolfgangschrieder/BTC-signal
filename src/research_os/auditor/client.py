@@ -52,6 +52,10 @@ def prepare_prompt(snapshot, previous):
         data['context_truncated'] += '; prior task interpretations omitted'
         payload, size = encode()
     if size>16000:
+        data['previous_comments'] = []
+        data['context_truncated'] += '; previous snapshots omitted; changes cannot be assessed'
+        payload, size = encode()
+    if size>16000:
         raise ValueError('Auditor input exceeds byte budget')
     # Conservative byte-based reservation plus message framing and maximum output.
     return payload, size
