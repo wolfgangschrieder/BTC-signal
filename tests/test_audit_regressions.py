@@ -86,7 +86,13 @@ def test_costs_reduce_ev_in_risk_units():
     analysis, probability = candidate()
     gross = SignalEngine().build(analysis, probability, 100, 2)
     net = SignalEngine(fee_bps=10, slippage_bps=10).build(analysis, probability, 100, 2)
-    assert gross.expected_value-net.expected_value == pytest.approx(.2)
+    target = evaluate_candle("long", entry_price=100, stop_loss=98, take_profit=103,
+        high=103, low=100, fee_bps=10, slippage_bps=10)
+    stop = evaluate_candle("long", entry_price=100, stop_loss=98, take_profit=103,
+        high=100, low=98, fee_bps=10, slippage_bps=10)
+    assert net.expected_value == pytest.approx(
+        (.8 * target.realized_return + .2 * stop.realized_return) / .02)
+    assert net.expected_value < gross.expected_value
 
 
 @pytest.mark.parametrize("direction,stop,tp", [("long",99,101), ("short",101,99)])

@@ -69,7 +69,7 @@ class ReplayEngine:
         if fee_bps < 0 or slippage_bps < 0: raise ValueError("fee_bps and slippage_bps must be non-negative")
         self.features=feature_engine or FeatureEngine(); self.builder=builder or MarketStateBuilder()
         self.analyzer=analyzer or MarketAnalyzer(); self.probability=probability or ProbabilityEngine()
-        self.signal_engine=signal_engine or SignalEngine(); self.horizon_minutes=horizon_minutes
+        self.signal_engine=signal_engine or SignalEngine(fee_bps=fee_bps, slippage_bps=slippage_bps); self.horizon_minutes=horizon_minutes
         self.fee_bps=fee_bps; self.slippage_bps=slippage_bps
         self.conservative_entry=conservative_entry
 
