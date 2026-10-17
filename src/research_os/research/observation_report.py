@@ -53,8 +53,26 @@ def build_report(session, *, symbol='BTCUSDT', hours=24, limit=1000, threshold=.
         GROUP BY direction, execution_policy, (probability_model_id IS NOT NULL), status
         ORDER BY n DESC, direction, execution_policy, calibrated, status LIMIT 51
     '''), params).mappings().all()
+    forecasts = session.execute(text("""
+        SELECT f.horizon_minutes,f.status,count(*) AS n,
+               avg(f.directional_return) AS mean_directional_return,
+               count(*) FILTER (WHERE f.directional_return > 0) AS correct_direction,
+               count(*) FILTER (WHERE f.directional_return = 0) AS flat,
+               avg(f.mfe) AS mean_mfe,avg(f.mae) AS mean_mae
+        FROM signal_forecasts f JOIN signal_outcomes s USING(signal_id)
+        WHERE s.symbol=:symbol AND s.signal_time>=:since AND s.signal_time<=:now
+        GROUP BY f.horizon_minutes,f.status ORDER BY f.horizon_minutes,f.status
+    """), params).mappings().all()
+    execution_states = session.execute(text("""
+        SELECT execution_state,count(*) AS n,avg(horizon_return) AS mean_horizon_return
+        FROM signal_outcomes WHERE symbol=:symbol AND signal_time>=:since AND signal_time<=:now
+        GROUP BY execution_state
+    """), params).mappings().all()
     return {
         'symbol': symbol, 'since_utc': since.isoformat(), 'as_of_utc': now.isoformat(),
+        'directional_forecasts': [dict(row) for row in forecasts],
+        'execution_states': [dict(row) for row in execution_states],
+        'forecast_reference': 'Last closed 1m candle known at decision; gross direction, not trade P&L',
         'sample_limit': limit, 'state_sample_may_be_truncated': len(rows) == limit,
         'state_sample': diagnostics,
         'configured_calibration_models': calibrated_models_configured,
