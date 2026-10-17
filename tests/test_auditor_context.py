@@ -82,3 +82,32 @@ def test_budget_trims_only_historical_interpretations_not_current_facts_or_tasks
     assert data['previous_comments'][0]['evidence']==previous[0]['evidence']
     assert data['task_history']==[] and 'context_truncated' in data
     assert snapshot['task_history'] and previous[0]['comment']
+
+
+def test_oversized_previous_evidence_does_not_block_current_report():
+    evidence = project_evidence() | {'sample.states': 240}
+    previous = [{'kind': 'periodic', 'period_end': '2026-10-17',
+                 'evidence': {'old_metric': 'я' * 10000}}]
+    snapshot = {'evidence': evidence, 'limitations': 'Current window only', 'tasks': []}
+    payload, size = prepare_prompt(snapshot, previous)
+    data = json.loads(payload)
+    assert size <= 16000
+    assert data['previous_comments'] == []
+    assert data['evidence'] == evidence
+    assert data['tasks'] == []
+    assert 'changes cannot be assessed' in data['context_truncated']
+    assert previous[0]['evidence']['old_metric']
+
+
+def test_production_sized_periodic_context_preserves_assigned_tasks():
+    evidence = {'current': 'x' * 6350}
+    tasks = [{'task_id': 'assigned', 'context': 'x' * 1480}]
+    snapshot = {'evidence': evidence, 'limitations': 'x' * 1090,
+                'tasks': tasks, 'task_history': [{'conclusion': 'x' * 350}]}
+    previous = [{'kind': 'periodic', 'evidence': {'old': 'x' * 1450}} for _ in range(2)]
+    payload, size = prepare_prompt(snapshot, previous)
+    data = json.loads(payload)
+    assert size <= 16000
+    assert data['evidence'] == evidence and data['tasks'] == tasks
+    assert data['limitations'] == snapshot['limitations']
+    assert data['previous_comments'] == []
