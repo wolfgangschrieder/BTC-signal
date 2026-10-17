@@ -21,11 +21,14 @@ class BybitRestClient:
             if owns_client:
                 await client.aclose()
 
-    async def get_kline(self, category: str = "linear", symbol: str = "BTCUSDT", interval: str = "1", limit: int = 200) -> dict[str, Any]:
+    async def get_kline(self, category: str = "linear", symbol: str = "BTCUSDT", interval: str = "1", limit: int = 200, end: int | None = None) -> dict[str, Any]:
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(base_url=self.BASE_URL, timeout=10.0)
         try:
-            response = await client.get("/v5/market/kline", params={"category": category, "symbol": symbol, "interval": interval, "limit": limit})
+            params = {"category": category, "symbol": symbol, "interval": interval, "limit": limit}
+            if end is not None:
+                params["end"] = end
+            response = await client.get("/v5/market/kline", params=params)
             response.raise_for_status()
             payload = response.json()
             if payload.get("retCode") != 0:
