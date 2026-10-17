@@ -37,6 +37,10 @@ def collect_snapshot(session, end, kind, settings):
         'cohort.completed': cohort['completed'],
         'cohort.tp1_confirmation_fraction': cohort['confirmed_tp1_fraction_among_completed'],
     }
+    evidence['forecast.directional_by_horizon'] = report.get('directional_forecasts', [])
+    evidence['forecast.reference'] = report.get('forecast_reference')
+    evidence['execution.expiry_states'] = report.get('execution_states', [])
+    evidence['forecast.interpretation'] = 'Direction labels are gross price moves, not executed or simulated trade profit; flat is separate; pending/insufficient_data excluded from accuracy'
     evidence.update(project_evidence())
     for direction in ('bullish','bearish','conflicting','neutral'):
         evidence[f'sample.direction.{direction}'] = sample['analysis_directions'].get(direction, 0)

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from research_os.database.session import SessionLocal
 from research_os.signals.outcome_evaluator import SignalOutcomeEvaluator
+from research_os.signals.forecast_evaluator import SignalForecastEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,10 @@ class OutcomeResolutionScheduler:
 
     def _resolve(self) -> int:
         with SessionLocal() as session:
-            return self.evaluator.resolve_pending(session, datetime.now(UTC))
+            now = datetime.now(UTC)
+            resolved = self.evaluator.resolve_pending(session, now)
+            SignalForecastEvaluator().resolve(session, now)
+            return resolved
 
     async def run(self, stop: asyncio.Event) -> None:
         while not stop.is_set():

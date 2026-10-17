@@ -38,6 +38,9 @@ class SignalOutcomeRepository:
         return session.execute(text("""SELECT signal_id,symbol,direction,signal_time,entry_price,stop_loss,tp1,tp2,tp3,probability,horizon_minutes,fee_bps,slippage_bps,execution_policy
         FROM signal_outcomes WHERE status='pending' AND signal_time < :now ORDER BY signal_time"""),{"now":now}).mappings().all()
 
-    def resolve(self,session:Session,signal_id,status,realized_return=None,mfe=None,mae=None,resolved_at=None,reason=None):
-        session.execute(text("""UPDATE signal_outcomes SET status=:status,realized_return=:ret,mfe=:mfe,mae=:mae,resolved_at=:resolved,reason=:reason WHERE signal_id=:id"""),
-                        {"status":status.value if hasattr(status,"value") else status,"ret":realized_return,"mfe":mfe,"mae":mae,"resolved":resolved_at or datetime.now(timezone.utc),"reason":reason,"id":signal_id})
+    def resolve(self,session:Session,signal_id,status,realized_return=None,mfe=None,mae=None,resolved_at=None,reason=None,execution_state=None,horizon_return=None):
+        if execution_state is None:
+            value = status.value if hasattr(status, "value") else status
+            execution_state = {"win":"filled_tp1", "loss":"filled_sl", "ambiguous":"ambiguous"}.get(value)
+        session.execute(text("""UPDATE signal_outcomes SET status=:status,realized_return=:ret,mfe=:mfe,mae=:mae,resolved_at=:resolved,reason=:reason,execution_state=:execution_state,horizon_return=:horizon_return WHERE signal_id=:id"""),
+                        {"status":status.value if hasattr(status,"value") else status,"ret":realized_return,"mfe":mfe,"mae":mae,"resolved":resolved_at or datetime.now(timezone.utc),"reason":reason,"execution_state":execution_state,"horizon_return":horizon_return,"id":signal_id})
