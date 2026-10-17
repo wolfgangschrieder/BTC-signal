@@ -38,7 +38,7 @@ class SignalOutcomeEvaluator:
             candles=session.execute(text("""SELECT event_time,open,high,low,close FROM market.candles
                 WHERE symbol=:symbol AND interval='1'
                 AND (event_time>:time OR (:include_decision_minute AND event_time=:decision_minute))
-                AND event_time<=:until AND point_in_time_available_at<=:now ORDER BY event_time"""),
+                AND event_time + interval '1 minute'<=:until AND point_in_time_available_at<=:now ORDER BY event_time"""),
                 {"symbol":s["symbol"],"time":s["signal_time"],"decision_minute":decision_minute,
                  "include_decision_minute":include_decision_minute,
                  "until":s["signal_time"]+timedelta(minutes=horizon),"now":now}).mappings().all()
@@ -85,5 +85,27 @@ class SignalOutcomeEvaluator:
                 ); resolved+=1; break
             else:
                 if now >= s["signal_time"]+timedelta(minutes=horizon):
-                    repo.resolve(session,s["signal_id"],OutcomeStatus.EXPIRED,None,best_mfe,worst_mae,now,"horizon expired without TP1/SL"); resolved+=1
+                    # Missing candles cannot prove that an entry/exit never happened.
+                    start = decision_minute + timedelta(minutes=1)
+                    if include_decision_minute:
+                        start = decision_minute
+                    end = (s["signal_time"] + timedelta(minutes=horizon)).replace(second=0, microsecond=0)
+                    expected = int((end-start).total_seconds()/60)
+                    complete = len(candles) == expected and all(
+                        c["event_time"] == start + timedelta(minutes=i) for i,c in enumerate(candles))
+                    state = "unfilled" if entry is None else "filled_expired"
+                    marked_return = None
+                    if not complete:
+                        state = "insufficient_data"
+                    elif entry is not None:
+                        close = float(candles[-1]["close"])
+                        slip = float(s.get("slippage_bps", 0))/10000
+                        fee = float(s.get("fee_bps", 0))/10000
+                        exit_price = close * (1-slip if s["direction"] == "long" else 1+slip)
+                        sign = 1 if s["direction"] == "long" else -1
+                        marked_return = sign * (exit_price-entry)/entry - 2*fee
+                    repo.resolve(session,s["signal_id"],OutcomeStatus.EXPIRED,None,best_mfe,worst_mae,now,
+                                 "horizon ended: " + state, execution_state=state,
+                                 horizon_return=marked_return)
+                    resolved+=1
         session.commit(); return resolved
