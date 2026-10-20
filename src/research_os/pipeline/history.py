@@ -85,3 +85,23 @@ def describe_history(rows, before):
             'first_restorable_utc':restored[0].timestamp.isoformat() if restored else None,
             'boundary_utc':expected.isoformat(), 'boundary_reason':reason,
             'scope':'Database restoration at cutoff; not live in-memory history. Raw absence does not prove retention caused it.'}
+
+
+def latest_closed_history_diagnostic(session, symbol, as_of, limit):
+    """Diagnose continuity behind the latest available closed bar, retaining lag."""
+    if not 1 <= limit <= 10080:
+        raise ValueError('History must be bounded to seven days')
+    latest = session.execute(text("""SELECT max(event_time) FROM market.candles
+        WHERE symbol=:symbol AND interval='1' AND source='bybit'
+          AND event_time>=:lower
+          AND event_time + interval '1 minute'<=:as_of
+          AND point_in_time_available_at<=:as_of"""),
+        {'symbol': symbol, 'lower': as_of-timedelta(minutes=limit+1),
+         'as_of': as_of}).scalar_one_or_none()
+    if latest is None:
+        return {'status': 'no_closed_candle', 'latest_closed_at_utc': None,
+                'lag_seconds': None, 'restoration': None}
+    closed_at = latest + timedelta(minutes=1)
+    return {'status': 'observed', 'latest_closed_at_utc': closed_at.isoformat(),
+            'lag_seconds': (as_of-closed_at).total_seconds(),
+            'restoration': history_diagnostic(session, symbol, closed_at, as_of, limit)}

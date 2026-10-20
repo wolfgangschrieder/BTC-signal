@@ -99,8 +99,12 @@ Replay can explicitly use `conservative_entry=False` to reproduce the legacy pol
 The fill model uses a limit at the entry-zone midpoint. It does not model fills
 anywhere in the zone, order queues, funding, or actual market-order gap prices.
 `EXECUTION_FEE_BPS` and `EXECUTION_SLIPPAGE_BPS` are per-side assumptions, default
-zero for compatibility; set them explicitly for meaningful net results. EV subtracts
-an approximate round-trip cost in risk units but still assumes binary TP1/SL resolution.
+5.5 and 2 bps respectively (15 bps round trip). These are research assumptions,
+not verified account tariffs. Explicit environment values override defaults, including
+existing zero values: update those on deployed servers to enable cost-aware selection.
+The engine rejects TP1 when its simulated net return is non-positive and uses the
+same adverse fills as outcomes for the binary TP1/SL EV proxy. Historical outcomes
+retain their original saved costs.
 Calibration and win rate based on WIN/LOSS are conditional on resolution; EXPIRED
 and AMBIGUOUS outcomes are excluded and must not be presented as unconditional success.
 The six-hour VPS raw retention policy is unchanged; full historical tick replay
