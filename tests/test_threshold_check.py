@@ -183,3 +183,27 @@ def test_later_recovery_cannot_reverse_an_executed_stop(direction, horizon):
     first_exit = outcome(direction, bar(), [stopped], 2)
     assert (status, net) == first_exit
     assert net < 0
+
+
+def test_paired_horizons_use_identical_cohort_and_explicit_zero_costs():
+    from research_os.research.threshold_check import study_paired_horizons
+    result = study_paired_horizons(*study_inputs(), horizons=(1, 3))
+    reports = result['reports_by_horizon']
+    for segment in ('train', 'holdout'):
+        for threshold in ('.4', '.5', '.6', '.7'):
+            key = str(float(threshold))
+            counts = [reports[h][cost]['reports'][segment][key]['candidates']
+                      for h in ('1', '3') for cost in ('zero_cost', 'configured_cost')]
+            assert len(set(counts)) == 1
+    assert reports['1']['zero_cost']['execution_costs']['round_trip_bps'] == 0
+    assert reports['1']['configured_cost']['execution_costs']['round_trip_bps'] == 15
+    assert reports['1']['zero_cost']['excluded'] == reports['3']['configured_cost']['excluded']
+
+
+def test_paired_horizons_reject_gap_even_outside_short_exit_window():
+    from research_os.research.threshold_check import study_paired_horizons
+    rows, candles = study_inputs()
+    candles.pop(7)
+    reports = study_paired_horizons(rows, candles, horizons=(1, 3))['reports_by_horizon']
+    assert reports['1']['zero_cost']['excluded'].get('candle_gap', 0) > 0
+    assert reports['1']['zero_cost']['excluded'] == reports['3']['zero_cost']['excluded']
