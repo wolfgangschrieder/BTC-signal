@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from research_os.auditor.context import project_evidence
 from research_os.features.timeframes import Timeframe
-from research_os.pipeline.history import history_diagnostic
+from research_os.pipeline.history import history_diagnostic, latest_closed_history_diagnostic
 from research_os.research.observation_report import build_report
 from research_os.research.threshold_check import study_cost_comparison
 
@@ -52,6 +52,9 @@ def collect_snapshot(session, end, kind, settings):
         FROM raw.events WHERE source='bybit' AND ingestion_time>=:lower AND ingestion_time<=:end
         GROUP BY event_type'''), {'lower':end-timedelta(minutes=15),'end':end}).mappings().all()
     latest = {row['event_type']:row['latest'] for row in freshness}
+    evidence['data.received_event_types_15m'] = {
+        name: (end-received).total_seconds() for name, received in sorted(latest.items())
+    }
     for event in ('candle','trade','ticker','orderbook_update'):
         evidence[f'data.{event}_age_seconds'] = (end-latest[event]).total_seconds() if event in latest else None
     delivery = session.execute(text('''SELECT count(*) AS pending,max(attempts) AS max_attempts
@@ -69,6 +72,8 @@ def collect_snapshot(session, end, kind, settings):
     evidence['history.limitations'] = 'Stored PIT-available minute rows; not proof of contiguous bars or application in-memory history'
     evidence['history.restoration'] = history_diagnostic(
         session, 'BTCUSDT', end.replace(second=0,microsecond=0), end, min(settings.live_history_minutes,10080))
+    evidence['history.latest_closed_restoration'] = latest_closed_history_diagnostic(
+        session, 'BTCUSDT', end, min(settings.live_history_minutes,10080))
     memory = session.execute(text("""SELECT decision_time,data_quality
         FROM world.market_state_vectors WHERE symbol='BTCUSDT' AND decision_time<=:end
           AND decision_time>=:lower ORDER BY decision_time DESC LIMIT 1"""),

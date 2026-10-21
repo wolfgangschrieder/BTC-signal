@@ -167,3 +167,19 @@ def test_target_touch_can_lose_money_after_costs(direction):
     status, net = outcome(direction, bar(), [bar(high=target, low=target)], atr)
     assert status == 'win' and net < 0
     assert net_target_return(direction, price, atr) == pytest.approx(net)
+
+@pytest.mark.parametrize('direction', ['long', 'short'])
+@pytest.mark.parametrize('horizon', [15, 30, 60, 120, 240])
+def test_later_recovery_cannot_reverse_an_executed_stop(direction, horizon):
+    # A longer horizon changes expiry only; it must not erase earlier exits.
+    if direction == 'long':
+        stopped = bar(opening=100, high=100.5, low=97.5, close=98)
+        recovery = bar(opening=100, high=104, low=99, close=103)
+    else:
+        stopped = bar(opening=100, high=102.5, low=99.5, close=102)
+        recovery = bar(opening=100, high=101, low=96, close=97)
+    status, net = outcome(direction, bar(), [stopped] + [recovery]*(horizon-1), 2)
+    assert status == 'loss'
+    first_exit = outcome(direction, bar(), [stopped], 2)
+    assert (status, net) == first_exit
+    assert net < 0
