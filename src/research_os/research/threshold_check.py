@@ -124,11 +124,14 @@ def _threshold_reports(data):
     return reports
 
 
-def study(rows, candles, horizon=30, *, fee_bps=5.5, slippage_bps=2.0):
+def study(rows, candles, horizon=30, *, fee_bps=5.5, slippage_bps=2.0, cohort_horizon=None):
     if horizon < 1:
         raise ValueError("horizon must be positive")
     if any(not isfinite(value) or value < 0 for value in (fee_bps, slippage_bps)):
         raise ValueError("cost assumptions must be finite and non-negative")
+    eligibility_horizon = horizon if cohort_horizon is None else cohort_horizon
+    if eligibility_horizon < horizon:
+        raise ValueError("cohort horizon must cover the evaluated horizon")
     costs = {
         'fee_bps_per_side': fee_bps,
         'slippage_bps_per_side': slippage_bps,
@@ -182,10 +185,10 @@ def study(rows, candles, horizon=30, *, fee_bps=5.5, slippage_bps=2.0):
                 counterfactual_excluded['missing_atr'] += 1
             continue
         offset = bisect_left(candle_times, decision)
-        future = candles[offset:offset+horizon]
+        future = candles[offset:offset+eligibility_horizon]
         segment = 'train' if decision < split else 'holdout'
         boundary = split if segment == 'train' else end
-        if len(future) != horizon or future[-1]['point_in_time_available_at'] > boundary:
+        if len(future) != eligibility_horizon or future[-1]['point_in_time_available_at'] > boundary:
             if current_directional:
                 excluded['immature_or_crosses_split'] += 1
             if counterfactual_directional:
@@ -201,6 +204,7 @@ def study(rows, candles, horizon=30, *, fee_bps=5.5, slippage_bps=2.0):
             if counterfactual_directional:
                 counterfactual_excluded['candle_gap'] += 1
             continue
+        future = future[:horizon]
         for policy, candidate_analysis in (
             ('current_abstain_on_conflict', analysis),
             ('dominant_direction_counterfactual', counterfactual),
@@ -265,6 +269,32 @@ def study_cost_comparison(rows, candles, horizon=30, *, configured_fee_bps,
     }}
 
 
+def study_paired_horizons(rows, candles, horizons=(15, 30, 60, 120, 240), *,
+                          fee_bps=5.5, slippage_bps=2.0):
+    """Compare fixed exits on a common mature cohort, including split purging."""
+    horizons = tuple(horizons)
+    if not horizons or any(type(h) is not int or h < 1 for h in horizons):
+        raise ValueError("horizons must be positive integers")
+    maximum = max(horizons)
+    reports = {}
+    for horizon in horizons:
+        reports[str(horizon)] = {
+            name: study(rows, candles, horizon, fee_bps=fee, slippage_bps=slip,
+                        cohort_horizon=maximum)
+            for name, fee, slip in (
+                ('zero_cost', 0.0, 0.0), ('configured_cost', fee_bps, slippage_bps)
+            )
+        }
+    return {
+        'cohort_horizon_minutes': maximum,
+        'reports_by_horizon': reports,
+        'limitations': 'Exploratory sensitivity study; horizons are not selected using holdout. '
+                        'Zero costs are optimistic. Overlapping samples are not independent. '
+                        'Stops and targets remain fixed; later recovery cannot undo an exit. '
+                        'All horizons require a complete maximum-horizon window and identical split purge.',
+    }
+
+
 def main():
     as_of = datetime.now(UTC)
     settings = get_settings()
@@ -285,6 +315,9 @@ def main():
         result = study_cost_comparison(rows, candles,
                                       configured_fee_bps=settings.execution_fee_bps,
                                       configured_slippage_bps=settings.execution_slippage_bps)
+        result['paired_horizon_comparison'] = study_paired_horizons(
+            rows, candles, fee_bps=settings.execution_fee_bps,
+            slippage_bps=settings.execution_slippage_bps)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
